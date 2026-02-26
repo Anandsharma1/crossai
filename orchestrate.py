@@ -232,7 +232,7 @@ class DebateLog:
 # ---------------------------------------------------------------------------
 
 def run_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT) -> str:
-    cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--max-turns", "6", prompt]
+    cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--tools", "", "--max-turns", "1", prompt]
     return _run_cli(cmd, "Claude", timeout)
 
 def run_claude_with_edits(prompt: str, cwd: str = None, timeout: int = CLAUDE_TIMEOUT) -> str:
