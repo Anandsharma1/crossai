@@ -18,6 +18,63 @@ _remove() {
     fi
 }
 
+# Remove CrossAI tasks and inputs from a .vscode/tasks.json, leaving other tasks intact.
+strip_vscode_tasks() {
+    local tasks_file="$1"
+    if [[ ! -f "$tasks_file" ]]; then
+        echo -e "  ${YELLOW}-${NC}  Not found (skipping) $tasks_file"
+        return
+    fi
+    python3 - <<PYEOF
+import json
+
+CROSSAI_LABELS = {
+    "CrossAI: Ideation",
+    "CrossAI: Plan",
+    "CrossAI: Implement (Claude)",
+    "CrossAI: Implement (Codex)",
+    "CrossAI: Implement (both)",
+    "CrossAI: Review",
+}
+CROSSAI_INPUT_IDS = {"featureName", "promptFile", "roundCount"}
+
+with open('$tasks_file') as f:
+    data = json.load(f)
+
+before = len(data.get('tasks', []))
+data['tasks'] = [t for t in data.get('tasks', []) if t.get('label') not in CROSSAI_LABELS]
+removed = before - len(data['tasks'])
+
+data['inputs'] = [i for i in data.get('inputs', []) if i.get('id') not in CROSSAI_INPUT_IDS]
+if not data['inputs']:
+    del data['inputs']
+
+with open('$tasks_file', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+
+print(f"  Removed {removed} CrossAI task(s) from $tasks_file")
+PYEOF
+    echo -e "  ${GREEN}✓${NC}  VS Code tasks cleaned: $tasks_file"
+}
+
+# Offer to remove .crossai/ generated debate artifacts from a given project dir.
+offer_remove_artifacts() {
+    local project_dir="$1"
+    local artifacts_dir="$project_dir/.crossai"
+    if [[ ! -d "$artifacts_dir" ]]; then
+        return
+    fi
+    echo ""
+    echo -e "  ${YELLOW}!${NC}  Generated debate artifacts found: $artifacts_dir"
+    read -rp "  Remove generated artifacts (.crossai/)? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        _remove "$artifacts_dir"
+    else
+        echo -e "  ${YELLOW}-${NC}  Kept $artifacts_dir"
+    fi
+}
+
 uninstall_user_level() {
     echo ""
     echo -e "${BOLD}Uninstalling CrossAI (user-level)...${NC}"
@@ -29,10 +86,23 @@ uninstall_user_level() {
     _remove "$HOME/.claude/skills/crossai-conducting"
     _remove "$HOME/.codex/skills/crossai-challenging"
 
+    # VS Code tasks — ask for project path
+    echo ""
+    read -rp "Remove CrossAI tasks from a project's .vscode/tasks.json? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        local target_project
+        read -rp "Project path: " target_project
+        target_project="${target_project/#\~/$HOME}"
+        if [[ ! -d "$target_project" ]]; then
+            echo -e "  ${RED}✗${NC}  Directory not found: $target_project — skipping."
+        else
+            strip_vscode_tasks "$target_project/.vscode/tasks.json"
+            offer_remove_artifacts "$target_project"
+        fi
+    fi
+
     echo ""
     echo -e "${GREEN}CrossAI removed.${NC}"
-    echo -e "${YELLOW}Note:${NC} Runtime artifacts in your projects' .crossai/ directories were NOT removed."
-    echo -e "      Delete them manually if you no longer need them."
 }
 
 uninstall_repo_level() {
@@ -48,10 +118,17 @@ uninstall_repo_level() {
     _remove "$cwd/.claude/skills/crossai-conducting"
     _remove "$cwd/.codex/skills/crossai-challenging"
 
+    # VS Code tasks — same project, strip automatically (with confirmation)
+    if [[ -f "$cwd/.vscode/tasks.json" ]]; then
+        echo ""
+        read -rp "Remove CrossAI tasks from .vscode/tasks.json? [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] && strip_vscode_tasks "$cwd/.vscode/tasks.json"
+    fi
+
+    offer_remove_artifacts "$cwd"
+
     echo ""
     echo -e "${GREEN}CrossAI removed from this repo.${NC}"
-    echo -e "${YELLOW}Note:${NC} .vscode/tasks.json was NOT modified. Remove CrossAI tasks from it manually."
-    echo -e "${YELLOW}Note:${NC} .crossai/ runtime artifacts were NOT removed. Delete manually if desired."
 }
 
 main() {
