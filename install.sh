@@ -243,10 +243,13 @@ handle_vscode_tasks() {
 # Per-project setup (reusable for --add-project and install_user_level)
 # ---------------------------------------------------------------------------
 
-# Sets up a single project: symlink + VS Code tasks + registry entry.
+# Sets up a single project: symlink + (optional) VS Code tasks + registry entry.
 # Expects CrossAI to already be installed at ~/.crossai/.
+# Usage: _setup_project <path> [vscode]
+#   vscode: "true" (default) or "false" — whether to inject VS Code tasks
 _setup_project() {
     local target_project="$1"
+    local with_vscode="${2:-true}"
     local meta_file="$HOME/.crossai/.meta.json"
 
     target_project="${target_project/#\~/$HOME}"   # expand leading ~
@@ -272,9 +275,11 @@ _setup_project() {
         echo -e "  ${YELLOW}-${NC}  $symlink exists and is not a symlink — skipping shortcut."
     fi
 
-    handle_vscode_tasks \
-        "$target_project/.vscode/tasks.json" \
-        '${env:HOME}/.crossai/orchestrate.py'
+    if [[ "$with_vscode" == "true" ]]; then
+        handle_vscode_tasks \
+            "$target_project/.vscode/tasks.json" \
+            '${env:HOME}/.crossai/orchestrate.py'
+    fi
     _record_vscode_project "$meta_file" "$target_project"
 }
 
@@ -299,13 +304,18 @@ install_user_level() {
 
     _write_meta "$meta_file" "user"
 
-    # VS Code tasks — ask for target project path
+    # Project registration — always ask; user can press Enter to skip
     echo ""
-    read -rp "Inject VS Code task shortcuts into a project? [y/N] " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-        local target_project
-        read -rp "Project path: " target_project
-        _setup_project "$target_project"
+    echo -e "Register a project? This creates .crossai/ with a symlink in your"
+    echo -e "project so you can run: ${BOLD}python .crossai/orchestrate.py --feature ...${NC}"
+    read -rp "Project path (Enter to skip): " target_project
+    if [[ -n "$target_project" ]]; then
+        local with_vscode="false"
+        read -rp "Also inject VS Code task shortcuts? [y/N] " vscode_ans
+        [[ "$vscode_ans" =~ ^[Yy]$ ]] && with_vscode="true"
+        _setup_project "$target_project" "$with_vscode"
+        echo ""
+        echo -e "  ${BLUE}Tip:${NC} Add more projects later with: ./install.sh --add-project <path>"
     fi
 
     echo ""
