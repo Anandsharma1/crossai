@@ -68,7 +68,27 @@ cp skills/codex/SKILL.md   ~/.codex/skills/crossai-challenging/SKILL.md
 cat VERSION > ~/.crossai/.version
 ```
 
-### 5. (Optional) Inject VS Code tasks
+### 5. Set up a project shortcut
+
+For each project where you want to use CrossAI, create the artifact directory
+and a symlink so you can run the tool with a short path:
+
+```bash
+mkdir -p /your/project/.crossai
+ln -s ~/.crossai/orchestrate.py /your/project/.crossai/orchestrate.py
+```
+
+Now from the project root you can run:
+
+```bash
+cd /your/project
+python .crossai/orchestrate.py --feature my-feature --prompt prompt.md --phase ideation
+```
+
+CrossAI auto-detects the project root from `.git/`, `.vscode/`, `pyproject.toml`, etc.
+Use `--project-dir /path/to/project` to override.
+
+### 6. (Optional) Inject VS Code tasks
 
 For each project where you want task shortcuts:
 
@@ -180,6 +200,12 @@ git pull
 rm -rf ~/.crossai
 rm -rf ~/.claude/skills/crossai-conducting
 rm -rf ~/.codex/skills/crossai-challenging
+```
+
+For each project where you created a shortcut (step 5 above), remove the symlink:
+
+```bash
+rm /your/project/.crossai/orchestrate.py
 ```
 
 Runtime artifacts in your projects' `.crossai/` directories are not touched.

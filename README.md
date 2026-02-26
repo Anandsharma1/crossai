@@ -61,8 +61,8 @@ The installer checks prerequisites, asks whether you want a **user-level** insta
 
 | | Repo-level | User-level |
 |---|---|---|
-| Debate artifacts (`.crossai/`) | Land in the project automatically | Land in whatever directory you run from |
-| Running the tool | `python cross_ai/orchestrate.py` | `python ~/.crossai/orchestrate.py` |
+| Debate artifacts (`.crossai/`) | Land in the project automatically | Auto-detected — land at the nearest project root (`.git/`, `.vscode/`, etc.) |
+| Running the tool | `python cross_ai/orchestrate.py` | `python ~/.crossai/orchestrate.py` or `python .crossai/orchestrate.py` (via symlink) |
 | Team setup | Everyone gets it on `git pull` | Each developer installs separately |
 | Updating CrossAI | Re-run `./install.sh` per project | Update once, all projects benefit |
 | Multiple projects | Duplicates files in each repo | Single copy, shared across all |
@@ -88,32 +88,39 @@ EOF
 **2. Run ideation** (3 rounds of debate, ~5 minutes)
 
 ```bash
-# User-level install
-python ~/.crossai/orchestrate.py --feature user-auth --prompt prompt.md --phase ideation
-
 # Repo-level install
 python cross_ai/orchestrate.py --feature user-auth --prompt prompt.md --phase ideation
+
+# User-level install (full path)
+python ~/.crossai/orchestrate.py --feature user-auth --prompt prompt.md --phase ideation
+
+# User-level install (via project symlink, if created during install)
+python .crossai/orchestrate.py --feature user-auth --prompt prompt.md --phase ideation
 ```
+
+CrossAI automatically detects the project root by looking for `.git/`, `.vscode/`,
+`pyproject.toml`, `package.json`, and similar markers — artifacts always land in
+`.crossai/<feature>/` at the detected root. Use `--project-dir /path` to override.
 
 **3. Run planning** (reads ideation output automatically)
 
 ```bash
-python ~/.crossai/orchestrate.py --feature user-auth --phase plan
+python .crossai/orchestrate.py --feature user-auth --phase plan
 ```
 
 **4. Implement** (both agents in parallel git worktrees)
 
 ```bash
-python ~/.crossai/orchestrate.py --feature user-auth --phase implement --both
+python .crossai/orchestrate.py --feature user-auth --phase implement --both
 ```
 
 **5. Cross-review**
 
 ```bash
-python ~/.crossai/orchestrate.py --feature user-auth --phase review
+python .crossai/orchestrate.py --feature user-auth --phase review
 ```
 
-Artifacts land in `.crossai/user-auth/` in your project directory.
+Artifacts land in `.crossai/user-auth/` at the detected project root.
 
 ---
 
@@ -123,13 +130,21 @@ CrossAI injects a `principles.md` file into every prompt, letting you encode
 team conventions and quality bars that both AIs must respect.
 
 ```bash
-# User-level
+# Repo-level (lives alongside cross_ai/)
+cp cross_ai/principles.example.md cross_ai/principles.md
+$EDITOR cross_ai/principles.md
+
+# User-level, project-scoped (lives in .crossai/ — auto-detected at project root)
+cp ~/.crossai/principles.example.md .crossai/principles.md
+$EDITOR .crossai/principles.md
+
+# User-level, shared across all projects
 cp ~/.crossai/principles.example.md ~/.crossai/principles.md
 $EDITOR ~/.crossai/principles.md
-
-# Repo-level
-cp cross_ai/principles.example.md cross_ai/principles.md
 ```
+
+CrossAI checks for principles in order: `.crossai/<feature>/principles.md` (feature override) →
+`.crossai/principles.md` (project-wide) → `~/.crossai/principles.md` (user-level global).
 
 See [Configuring principles.md](docs/principles.md) for details.
 

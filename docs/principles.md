@@ -6,24 +6,34 @@ so that every plan and every piece of generated code reflects your standards.
 
 ## Creating your principles file
 
-**User-level:**
-```bash
-cp ~/.crossai/principles.example.md ~/.crossai/principles.md
-$EDITOR ~/.crossai/principles.md
-```
-
-**Repo-level:**
+**Repo-level** (lives alongside `cross_ai/`):
 ```bash
 cp cross_ai/principles.example.md cross_ai/principles.md
 $EDITOR cross_ai/principles.md
 ```
 
-## Scope
+**User-level, project-scoped** (lives in `.crossai/` at the project root):
+```bash
+cp ~/.crossai/principles.example.md .crossai/principles.md
+$EDITOR .crossai/principles.md
+```
 
-CrossAI looks for principles in this order (most specific wins):
+**User-level, shared across all projects**:
+```bash
+cp ~/.crossai/principles.example.md ~/.crossai/principles.md
+$EDITOR ~/.crossai/principles.md
+```
 
-1. `.crossai/<feature>/principles.md` — feature-specific overrides
-2. `.crossai/principles.md` (repo-level install) or `~/.crossai/principles.md` (user-level) — global
+## Lookup order
+
+CrossAI checks for principles in this order (most specific wins):
+
+1. `<project>/.crossai/<feature>/principles.md` — feature-specific override
+2. `<project>/.crossai/principles.md` — project-wide (works for both install modes)
+3. `~/.crossai/principles.md` (user-level) or `cross_ai/principles.md` (repo-level) — installation global
+
+`<project>` is the auto-detected project root (nearest `.git/`, `.vscode/`, `pyproject.toml`,
+`package.json`, `Cargo.toml`, or `go.mod` ancestor). Override with `--project-dir`.
 
 ## What to put in principles.md
 
