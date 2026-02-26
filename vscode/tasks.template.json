@@ -1,0 +1,103 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CrossAI: Ideation",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "{{ORCHESTRATE_PATH}}",
+        "--feature", "${input:featureName}",
+        "--prompt", "${input:promptFile}",
+        "--phase", "ideation",
+        "--rounds", "${input:roundCount}"
+      ],
+      "presentation": { "reveal": "always", "panel": "new", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "CrossAI: Plan",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "{{ORCHESTRATE_PATH}}",
+        "--feature", "${input:featureName}",
+        "--phase", "plan",
+        "--rounds", "${input:roundCount}"
+      ],
+      "presentation": { "reveal": "always", "panel": "new", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "CrossAI: Implement (Claude)",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "{{ORCHESTRATE_PATH}}",
+        "--feature", "${input:featureName}",
+        "--phase", "implement",
+        "--agent", "claude"
+      ],
+      "presentation": { "reveal": "always", "panel": "new", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "CrossAI: Implement (Codex)",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "{{ORCHESTRATE_PATH}}",
+        "--feature", "${input:featureName}",
+        "--phase", "implement",
+        "--agent", "codex"
+      ],
+      "presentation": { "reveal": "always", "panel": "new", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "CrossAI: Implement (both)",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "{{ORCHESTRATE_PATH}}",
+        "--feature", "${input:featureName}",
+        "--phase", "implement",
+        "--both"
+      ],
+      "presentation": { "reveal": "always", "panel": "new", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "CrossAI: Review",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "{{ORCHESTRATE_PATH}}",
+        "--feature", "${input:featureName}",
+        "--phase", "review"
+      ],
+      "presentation": { "reveal": "always", "panel": "new", "focus": true },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "featureName",
+      "description": "Feature name (used as directory name under .crossai/)",
+      "type": "promptString",
+      "default": ""
+    },
+    {
+      "id": "promptFile",
+      "description": "Path to initial prompt file (relative to project root)",
+      "type": "promptString",
+      "default": "prompt.md"
+    },
+    {
+      "id": "roundCount",
+      "description": "Number of debate rounds (3 is a good default)",
+      "type": "promptString",
+      "default": "3"
+    }
+  ]
+}
