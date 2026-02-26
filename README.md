@@ -73,6 +73,41 @@ Prefer doing it by hand? See [Manual Installation](docs/manual-install.md).
 
 ---
 
+## Adding CrossAI to a new project (user-level install already done)
+
+**1. Create and open the project**
+
+```bash
+mkdir ~/projects/my-new-thing
+code ~/projects/my-new-thing
+```
+
+**2. Set up the project shortcut (one-time per project)**
+
+From the project root, create the artifact directory and a symlink so you can
+run CrossAI with a short path:
+
+```bash
+mkdir -p .crossai
+ln -s ~/.crossai/orchestrate.py .crossai/orchestrate.py
+```
+
+**3. (Optional) Add VS Code task shortcuts**
+
+```bash
+mkdir -p .vscode
+sed 's|{{ORCHESTRATE_PATH}}|${env:HOME}/.crossai/orchestrate.py|g' \
+    ~/.crossai/vscode/tasks.template.json \
+    > .vscode/tasks.json
+```
+
+This gives you `Ctrl+Shift+P` → **Tasks: Run Task** → `CrossAI: Ideation` etc.
+See [VS Code Integration](docs/vscode-integration.md) for details.
+
+From here, follow the usual [Getting started](#getting-started) workflow below.
+
+---
+
 ## Getting started
 
 **1. Write your feature prompt**
