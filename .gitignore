@@ -1,0 +1,10 @@
+# Runtime artifacts (project-local, not part of the distribution)
+.crossai/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS (in case contributors use it)
+.DS_Store
