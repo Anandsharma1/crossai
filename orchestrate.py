@@ -231,8 +231,11 @@ class DebateLog:
 # CLI Runners
 # ---------------------------------------------------------------------------
 
-def run_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT) -> str:
-    cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--tools", "", "--max-turns", "1", prompt]
+def run_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT, allow_tools: bool = False) -> str:
+    if allow_tools:
+        cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--max-turns", "10", prompt]
+    else:
+        cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--tools", "", "--max-turns", "1", prompt]
     return _run_cli(cmd, "Claude", timeout)
 
 def run_claude_with_edits(prompt: str, cwd: str = None, timeout: int = CLAUDE_TIMEOUT) -> str:
@@ -487,7 +490,7 @@ def run_debate(feature: str, phase_name: str, initial_prompt: str,
             "principles": principles,
         })
 
-        claude_output = run_claude(groom_prompt)
+        claude_output = run_claude(groom_prompt, allow_tools=read_codebase)
         write_artifact(rdir / f"claude.{artifact_prefix}.md", claude_output,
                        phase=phase_name, round_num=0, step="groom", agent="Claude")
         log.record(0, "groom", "Claude", claude_output)
@@ -531,7 +534,7 @@ def run_debate(feature: str, phase_name: str, initial_prompt: str,
                 "own_plan": latest_claude, "principles": principles,
                 "conversation_history": conversation_history,
             })
-            claude_critique = run_claude(critique_prompt_claude)
+            claude_critique = run_claude(critique_prompt_claude, allow_tools=read_codebase)
             write_artifact(rdir / "claude.critiques_codex.md", claude_critique,
                            phase=phase_name, round_num=r, step="critique", agent="Claude")
             log.record(r, "critique", "Claude (critiquing Codex)", claude_critique)
@@ -561,7 +564,7 @@ def run_debate(feature: str, phase_name: str, initial_prompt: str,
                 "feedback_source": "Codex", "principles": principles,
                 "conversation_history": conversation_history,
             })
-            claude_revised = run_claude(revise_prompt_claude)
+            claude_revised = run_claude(revise_prompt_claude, allow_tools=read_codebase)
             write_artifact(rdir / f"claude.revised_{artifact_prefix}.md", claude_revised,
                            phase=phase_name, round_num=r, step="revise", agent="Claude")
             log.record(r, "revise", "Claude", claude_revised)
