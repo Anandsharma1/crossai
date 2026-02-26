@@ -25,8 +25,12 @@ from enum import Enum
 # Configuration
 # ---------------------------------------------------------------------------
 
-CROSSAI_DIR = ".crossai"
+_CROSSAI_DIRNAME = ".crossai"
+CROSSAI_DIR: Path = Path(_CROSSAI_DIRNAME)  # Resolved to absolute path in main()
 PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+# Project root markers (checked in order; first match wins)
+_PROJECT_MARKERS = [".git", ".vscode", "pyproject.toml", "package.json", "Cargo.toml", "go.mod"]
 
 CLAUDE_CMD = "claude"
 CODEX_CMD = "codex"
@@ -139,7 +143,7 @@ class ConversationHistory:
 # ---------------------------------------------------------------------------
 
 def feature_dir(feature: str) -> Path:
-    return Path(CROSSAI_DIR) / feature
+    return CROSSAI_DIR / feature
 
 def phase_dir(feature: str, phase: str) -> Path:
     return feature_dir(feature) / phase
@@ -290,12 +294,18 @@ def assemble_prompt(template_name: str, variables: dict) -> str:
     return template
 
 def get_principles(feature: str) -> str:
+    # Feature-specific override (inside artifact dir)
     feature_principles = feature_dir(feature) / "principles.md"
     if feature_principles.exists():
         return read_file(feature_principles)
-    global_principles = Path(CROSSAI_DIR) / "principles.md"
-    if global_principles.exists():
-        return read_file(global_principles)
+    # Project-level principles (in artifact dir root)
+    project_principles = CROSSAI_DIR / "principles.md"
+    if project_principles.exists():
+        return read_file(project_principles)
+    # Installation-level principles (where orchestrate.py lives: ~/.crossai/ or cross_ai/)
+    install_principles = Path(__file__).parent / "principles.md"
+    if install_principles.exists():
+        return read_file(install_principles)
     return "(No shared principles defined.)"
 
 
@@ -843,6 +853,41 @@ def _find_latest_artifact(feature: str, phase_name: str, round_num: int, agent: 
 
 
 # ---------------------------------------------------------------------------
+# Project Root Detection
+# ---------------------------------------------------------------------------
+
+def _find_project_root(explicit_dir: str | None) -> Path:
+    """Resolve the project root for artifact placement.
+
+    Resolution order:
+      1. --project-dir flag (explicit override)
+      2. Nearest ancestor containing a .git/ directory
+      3. Nearest ancestor containing a common project marker
+         (.vscode/, pyproject.toml, package.json, Cargo.toml, go.mod)
+      4. Current working directory (fallback, with info message)
+    """
+    if explicit_dir:
+        p = Path(explicit_dir).expanduser().resolve()
+        if not p.is_dir():
+            print(f"✗ --project-dir not found: {p}")
+            sys.exit(1)
+        print(f"  ℹ Project root: {p}  (from --project-dir)")
+        return p
+
+    current = Path.cwd()
+    for candidate in [current, *current.parents]:
+        for marker in _PROJECT_MARKERS:
+            if (candidate / marker).exists():
+                via = f".{marker}" if marker.startswith(".") else marker
+                print(f"  ℹ Project root: {candidate}  (via {via})")
+                return candidate
+
+    print(f"  ℹ No project root detected — artifacts will be written to {current / _CROSSAI_DIRNAME}/")
+    print(f"    Use --project-dir /path/to/project to specify explicitly.")
+    return current
+
+
+# ---------------------------------------------------------------------------
 # CLI Entry Point
 # ---------------------------------------------------------------------------
 
@@ -884,8 +929,14 @@ def main():
                         help="Skip the interactive scope check after round 0")
     parser.add_argument("--read-codebase", action="store_true",
                         help="Allow agents to read project source code files (default: restricted)")
+    parser.add_argument("--project-dir", metavar="DIR",
+                        help="Project root for artifact placement (default: auto-detected)")
 
     args = parser.parse_args()
+
+    global CROSSAI_DIR
+    project_root = _find_project_root(args.project_dir)
+    CROSSAI_DIR = project_root / _CROSSAI_DIRNAME
 
     if args.phase in ("ideation", "plan"):
         explicit_prompt = None
