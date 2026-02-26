@@ -57,9 +57,17 @@ The installer checks prerequisites, asks whether you want a **user-level** insta
 (`~/.crossai/` — shared across all projects) or a **repo-level** install
 (`./cross_ai/` — checked into one project), then copies everything into place.
 
-**User-level** is the right choice if you plan to use CrossAI on multiple projects.
-**Repo-level** is the right choice if you want CrossAI versioned inside a single repo
-so your whole team gets it on `git pull`.
+### Which mode should I choose?
+
+| | Repo-level | User-level |
+|---|---|---|
+| Debate artifacts (`.crossai/`) | Land in the project automatically | Land in whatever directory you run from |
+| Running the tool | `python cross_ai/orchestrate.py` | `python ~/.crossai/orchestrate.py` |
+| Team setup | Everyone gets it on `git pull` | Each developer installs separately |
+| Updating CrossAI | Re-run `./install.sh` per project | Update once, all projects benefit |
+| Multiple projects | Duplicates files in each repo | Single copy, shared across all |
+
+**Start with repo-level** if you're using CrossAI on a specific project — artifacts land where you expect them and the team gets it for free. Switch to user-level if you find yourself installing it across many repos frequently.
 
 Prefer doing it by hand? See [Manual Installation](docs/manual-install.md).
 
