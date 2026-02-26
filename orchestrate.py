@@ -12,9 +12,12 @@ Usage:
 """
 
 import argparse
+import atexit
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from datetime import datetime
@@ -31,6 +34,9 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 # Project root markers (checked in order; first match wins)
 _PROJECT_MARKERS = [".git", ".vscode", "pyproject.toml", "package.json", "Cargo.toml", "go.mod"]
+
+# Neutral cwd for debate-phase CLI calls; None = inherit project dir (project context enabled)
+_DEBATE_CWD: str | None = None
 
 CLAUDE_CMD = "claude"
 CODEX_CMD = "codex"
@@ -233,7 +239,7 @@ class DebateLog:
 
 def run_claude(prompt: str, timeout: int = CLAUDE_TIMEOUT) -> str:
     cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--max-turns", "6", prompt]
-    return _run_cli(cmd, "Claude", timeout)
+    return _run_cli(cmd, "Claude", timeout, cwd=_DEBATE_CWD)
 
 def run_claude_with_edits(prompt: str, cwd: str = None, timeout: int = CLAUDE_TIMEOUT) -> str:
     cmd = [CLAUDE_CMD, "-p", "--output-format", "text", "--max-turns", "20", prompt]
@@ -241,7 +247,7 @@ def run_claude_with_edits(prompt: str, cwd: str = None, timeout: int = CLAUDE_TI
 
 def run_codex(prompt: str, timeout: int = CODEX_TIMEOUT) -> str:
     cmd = [CODEX_CMD, "exec", prompt]
-    return _run_cli(cmd, "Codex", timeout)
+    return _run_cli(cmd, "Codex", timeout, cwd=_DEBATE_CWD)
 
 def run_codex_with_edits(prompt: str, cwd: str = None, timeout: int = CODEX_TIMEOUT) -> str:
     cmd = [CODEX_CMD, "exec", "--full-auto", prompt]
@@ -888,6 +894,36 @@ def _find_project_root(explicit_dir: str | None) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Project Context Isolation
+# ---------------------------------------------------------------------------
+
+def _ask_project_context() -> bool:
+    """Ask whether debate agents should have access to the current project context.
+
+    Returns True if the user wants project context enabled (CLAUDE.md loaded,
+    source files accessible). Returns False (default) for clean isolation.
+    """
+    w = 58
+    print(f"\n{'─' * w}")
+    print("  Project context for this debate")
+    print(f"{'─' * w}")
+    print("  Disabled (default):")
+    print("    Agents work from your prompt only — no CLAUDE.md,")
+    print("    no source files. Best for new ideas without")
+    print("    codebase bias.")
+    print("")
+    print("  Enabled (--project-context):")
+    print("    Agents can read your CLAUDE.md and source files.")
+    print("    Useful when building on existing code.")
+    print(f"{'─' * w}")
+    try:
+        ans = input("  Include project context? [y/N] ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return ans.lower() in ("y", "yes")
+
+
+# ---------------------------------------------------------------------------
 # CLI Entry Point
 # ---------------------------------------------------------------------------
 
@@ -927,18 +963,34 @@ def main():
     parser.add_argument("--both", action="store_true", help="Run both agents for implementation")
     parser.add_argument("--no-scope-check", action="store_true",
                         help="Skip the interactive scope check after round 0")
+    parser.add_argument("--project-context", action="store_true",
+                        help="Enable project context: agents can read CLAUDE.md and source files "
+                             "(default: isolated — no project context leaks into debate)")
     parser.add_argument("--read-codebase", action="store_true",
-                        help="Allow agents to read project source code files (default: restricted)")
+                        help="Alias for --project-context (deprecated name)")
     parser.add_argument("--project-dir", metavar="DIR",
                         help="Project root for artifact placement (default: auto-detected)")
 
     args = parser.parse_args()
 
-    global CROSSAI_DIR
+    global CROSSAI_DIR, _DEBATE_CWD
     project_root = _find_project_root(args.project_dir)
     CROSSAI_DIR = project_root / _CROSSAI_DIRNAME
 
     if args.phase in ("ideation", "plan"):
+        project_context_on = args.project_context or args.read_codebase
+        if not project_context_on:
+            project_context_on = _ask_project_context()
+
+        if project_context_on:
+            _DEBATE_CWD = None  # inherit project cwd → CLAUDE.md loaded
+            print("  ℹ Project context: enabled")
+        else:
+            _tmpdir = tempfile.mkdtemp(prefix="crossai_debate_")
+            _DEBATE_CWD = _tmpdir
+            atexit.register(shutil.rmtree, _tmpdir, ignore_errors=True)
+            print("  ℹ Project context: disabled (isolated debate)")
+
         explicit_prompt = None
         if args.prompt:
             prompt_path = Path(args.prompt)
@@ -947,7 +999,7 @@ def main():
             explicit_prompt = read_file(prompt_path)
         run_debate_phase(args.feature, args.phase, explicit_prompt,
                          max_rounds=args.rounds, scope_check=not args.no_scope_check,
-                         read_codebase=args.read_codebase)
+                         read_codebase=project_context_on)
 
     elif args.phase == "implement":
         phase_implement(args.feature, agent=args.agent, both=args.both)
