@@ -188,12 +188,10 @@ install_user_level() {
     read -rp "Inject VS Code task shortcuts into a project? [y/N] " ans
     if [[ "$ans" =~ ^[Yy]$ ]]; then
         local target_project
-        read -rp "Project path (absolute, must be a git repo): " target_project
+        read -rp "Project path: " target_project
         target_project="${target_project/#\~/$HOME}"   # expand leading ~
         if [[ ! -d "$target_project" ]]; then
             echo -e "  ${RED}✗${NC}  Directory not found: $target_project — skipping VS Code tasks."
-        elif ! git -C "$target_project" rev-parse --git-dir &>/dev/null 2>&1; then
-            echo -e "  ${RED}✗${NC}  Not a git repository: $target_project — skipping VS Code tasks."
         else
             handle_vscode_tasks \
                 "$target_project/.vscode/tasks.json" \
