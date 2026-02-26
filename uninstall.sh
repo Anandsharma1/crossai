@@ -107,6 +107,12 @@ _cleanup_project() {
         echo -e "  ${YELLOW}-${NC}  Directory no longer exists, skipping."
         return
     fi
+    # Remove orchestrate.py symlink (safe — only removes if it is actually a symlink)
+    local symlink="$project/.crossai/orchestrate.py"
+    if [[ -L "$symlink" ]]; then
+        rm "$symlink"
+        echo -e "  ${GREEN}✓${NC}  Removed shortcut: $symlink"
+    fi
     if [[ -f "$project/.vscode/tasks.json" ]]; then
         read -rp "  Remove CrossAI tasks from .vscode/tasks.json? [y/N] " ans
         [[ "$ans" =~ ^[Yy]$ ]] && strip_vscode_tasks "$project/.vscode/tasks.json"

@@ -253,8 +253,21 @@ install_user_level() {
         read -rp "Project path: " target_project
         target_project="${target_project/#\~/$HOME}"   # expand leading ~
         if [[ ! -d "$target_project" ]]; then
-            echo -e "  ${RED}✗${NC}  Directory not found: $target_project — skipping VS Code tasks."
+            echo -e "  ${RED}✗${NC}  Directory not found: $target_project — skipping."
         else
+            # Create artifact dir and symlink so users can run: python .crossai/orchestrate.py
+            mkdir -p "$target_project/.crossai"
+            local symlink="$target_project/.crossai/orchestrate.py"
+            if [[ -L "$symlink" ]]; then
+                ln -sf "$HOME/.crossai/orchestrate.py" "$symlink"
+                echo -e "  ${GREEN}✓${NC}  Symlink updated: $symlink"
+            elif [[ ! -e "$symlink" ]]; then
+                ln -s "$HOME/.crossai/orchestrate.py" "$symlink"
+                echo -e "  ${GREEN}✓${NC}  Shortcut created: $symlink"
+                echo -e "       Run with: python .crossai/orchestrate.py --feature ..."
+            else
+                echo -e "  ${YELLOW}-${NC}  $symlink exists and is not a symlink — skipping shortcut."
+            fi
             handle_vscode_tasks \
                 "$target_project/.vscode/tasks.json" \
                 '${env:HOME}/.crossai/orchestrate.py'

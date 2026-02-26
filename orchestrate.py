@@ -27,7 +27,7 @@ from enum import Enum
 
 _CROSSAI_DIRNAME = ".crossai"
 CROSSAI_DIR: Path = Path(_CROSSAI_DIRNAME)  # Resolved to absolute path in main()
-PROMPTS_DIR = Path(__file__).parent / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 # Project root markers (checked in order; first match wins)
 _PROJECT_MARKERS = [".git", ".vscode", "pyproject.toml", "package.json", "Cargo.toml", "go.mod"]
@@ -303,7 +303,7 @@ def get_principles(feature: str) -> str:
     if project_principles.exists():
         return read_file(project_principles)
     # Installation-level principles (where orchestrate.py lives: ~/.crossai/ or cross_ai/)
-    install_principles = Path(__file__).parent / "principles.md"
+    install_principles = Path(__file__).resolve().parent / "principles.md"
     if install_principles.exists():
         return read_file(install_principles)
     return "(No shared principles defined.)"
