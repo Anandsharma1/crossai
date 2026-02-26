@@ -92,6 +92,20 @@ ideation → plan → implement → review
                        ↑ auto-reads plan_summary.md
 ```
 
+## Codebase Access
+
+By default, debate-phase Claude calls run with **tools disabled** (`--tools ""
+--max-turns 1`). This means Claude generates text purely from the prompt — no
+file reading, no codebase exploration. This prevents wasted turns and the
+`Error: Reached max turns` issue.
+
+When `--read-codebase` is passed, tools are enabled with `--max-turns 10`,
+allowing Claude to browse source files during the debate. Codex always runs
+in its default mode (tools determined by `codex exec`).
+
+The implement phase (`run_claude_with_edits`) always has tools enabled with
+`--max-turns 20` since it needs to create and edit files.
+
 ## Conversation History
 
 Every round includes the full debate history so far. When history exceeds ~80k characters, older rounds are auto-summarized via Claude to keep context manageable.

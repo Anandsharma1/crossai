@@ -272,6 +272,21 @@ relative to the repo root.
 Default timeout is 300s per agent. Large plans with long history can hit this.
 Run with fewer rounds (`--rounds 1`) or from a clean state.
 
+**`Error: Reached max turns (6)` in Claude output**
+This means Claude spent all its allowed turns on tool calls (reading files,
+searching the codebase) instead of generating the debate response.
+
+As of the latest version, this is fixed: debate-phase calls run with tools
+disabled (`--tools "" --max-turns 1`) so Claude produces text in a single turn.
+If you're on an older version, update your `orchestrate.py`.
+
+If you're using `--read-codebase` (tools enabled) and still hitting this, Claude
+may be exploring too many files. Options:
+- Increase the max-turns limit in `run_claude()` (the `allow_tools=True` branch
+  defaults to 10 — raise it if your codebase is large)
+- Narrow your prompt so Claude doesn't need to read as many files
+- Increase the timeout (`CLAUDE_TIMEOUT` in `orchestrate.py`, default 300s)
+
 **Debate history truncated unexpectedly**
 History auto-summarizes when it exceeds ~80k characters. This is expected behavior.
 The summary is injected as context for subsequent rounds.
