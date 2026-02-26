@@ -70,6 +70,10 @@ cat VERSION > ~/.crossai/.version
 
 ### 5. Set up a project shortcut
 
+> **Easier alternative:** If you have the CrossAI repo cloned, run
+> `./install.sh --add-project /your/project` instead — it does steps 5 and 6
+> for you and registers the project for later uninstall.
+
 For each project where you want to use CrossAI, create the artifact directory
 and a symlink so you can run the tool with a short path:
 
@@ -103,6 +107,11 @@ sed 's|{{ORCHESTRATE_PATH}}|${env:HOME}/.crossai/orchestrate.py|g' \
 If `.vscode/tasks.json` already exists, manually copy the `tasks` and `inputs`
 arrays from `vscode/tasks.template.json` into it, replacing `{{ORCHESTRATE_PATH}}`
 with `${env:HOME}/.crossai/orchestrate.py`.
+
+> **Note:** Projects added manually (without `--add-project`) won't appear in
+> `./install.sh --list-projects` and won't be auto-cleaned during uninstall.
+> You can still uninstall manually by removing the `.crossai/orchestrate.py`
+> symlink and the CrossAI entries from `.vscode/tasks.json`.
 
 ---
 

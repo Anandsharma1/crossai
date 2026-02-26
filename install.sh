@@ -114,6 +114,21 @@ copy_skill_files() {
 # Metadata
 # ---------------------------------------------------------------------------
 
+# Print one project path per line from .meta.json; empty output if no meta.
+_get_meta_projects() {
+    local meta_file="$1"
+    python3 - <<PYEOF
+import json
+try:
+    with open('$meta_file') as f:
+        data = json.load(f)
+    for p in data.get('vscode_projects', []):
+        print(p)
+except Exception:
+    pass
+PYEOF
+}
+
 # Create or update the .meta.json file at the install root.
 _write_meta() {
     local meta_file="$1" install_type="$2"
@@ -225,6 +240,45 @@ handle_vscode_tasks() {
 }
 
 # ---------------------------------------------------------------------------
+# Per-project setup (reusable for --add-project and install_user_level)
+# ---------------------------------------------------------------------------
+
+# Sets up a single project: symlink + VS Code tasks + registry entry.
+# Expects CrossAI to already be installed at ~/.crossai/.
+_setup_project() {
+    local target_project="$1"
+    local meta_file="$HOME/.crossai/.meta.json"
+
+    target_project="${target_project/#\~/$HOME}"   # expand leading ~
+    # Resolve to absolute path
+    target_project="$(cd "$target_project" 2>/dev/null && pwd)"
+
+    if [[ ! -d "$target_project" ]]; then
+        echo -e "  ${RED}✗${NC}  Directory not found: $target_project"
+        return 1
+    fi
+
+    # Create artifact dir and symlink
+    mkdir -p "$target_project/.crossai"
+    local symlink="$target_project/.crossai/orchestrate.py"
+    if [[ -L "$symlink" ]]; then
+        ln -sf "$HOME/.crossai/orchestrate.py" "$symlink"
+        echo -e "  ${GREEN}✓${NC}  Symlink updated: $symlink"
+    elif [[ ! -e "$symlink" ]]; then
+        ln -s "$HOME/.crossai/orchestrate.py" "$symlink"
+        echo -e "  ${GREEN}✓${NC}  Shortcut created: $symlink"
+        echo -e "       Run with: python .crossai/orchestrate.py --feature ..."
+    else
+        echo -e "  ${YELLOW}-${NC}  $symlink exists and is not a symlink — skipping shortcut."
+    fi
+
+    handle_vscode_tasks \
+        "$target_project/.vscode/tasks.json" \
+        '${env:HOME}/.crossai/orchestrate.py'
+    _record_vscode_project "$meta_file" "$target_project"
+}
+
+# ---------------------------------------------------------------------------
 # Install modes
 # ---------------------------------------------------------------------------
 
@@ -251,28 +305,7 @@ install_user_level() {
     if [[ "$ans" =~ ^[Yy]$ ]]; then
         local target_project
         read -rp "Project path: " target_project
-        target_project="${target_project/#\~/$HOME}"   # expand leading ~
-        if [[ ! -d "$target_project" ]]; then
-            echo -e "  ${RED}✗${NC}  Directory not found: $target_project — skipping."
-        else
-            # Create artifact dir and symlink so users can run: python .crossai/orchestrate.py
-            mkdir -p "$target_project/.crossai"
-            local symlink="$target_project/.crossai/orchestrate.py"
-            if [[ -L "$symlink" ]]; then
-                ln -sf "$HOME/.crossai/orchestrate.py" "$symlink"
-                echo -e "  ${GREEN}✓${NC}  Symlink updated: $symlink"
-            elif [[ ! -e "$symlink" ]]; then
-                ln -s "$HOME/.crossai/orchestrate.py" "$symlink"
-                echo -e "  ${GREEN}✓${NC}  Shortcut created: $symlink"
-                echo -e "       Run with: python .crossai/orchestrate.py --feature ..."
-            else
-                echo -e "  ${YELLOW}-${NC}  $symlink exists and is not a symlink — skipping shortcut."
-            fi
-            handle_vscode_tasks \
-                "$target_project/.vscode/tasks.json" \
-                '${env:HOME}/.crossai/orchestrate.py'
-            _record_vscode_project "$meta_file" "$target_project"
-        fi
+        _setup_project "$target_project"
     fi
 
     echo ""
@@ -374,10 +407,100 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Subcommands: --add-project, --list-projects
+# ---------------------------------------------------------------------------
+
+cmd_add_project() {
+    local project_path="$1"
+
+    if [[ ! -f "$HOME/.crossai/.version" ]]; then
+        echo -e "${RED}CrossAI is not installed at user level (~/.crossai/).${NC}"
+        echo "Run ./install.sh first, then use --add-project."
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${BOLD}Adding project: $project_path${NC}"
+    echo ""
+
+    _setup_project "$project_path"
+
+    echo ""
+    echo -e "${GREEN}Done.${NC} You can now run CrossAI from that project:"
+    echo ""
+    echo "  cd $project_path"
+    echo "  python .crossai/orchestrate.py --feature my-feature --prompt prompt.md --phase ideation"
+    echo ""
+}
+
+cmd_list_projects() {
+    local meta_file="$HOME/.crossai/.meta.json"
+
+    if [[ ! -f "$meta_file" ]]; then
+        echo ""
+        echo -e "${YELLOW}No CrossAI metadata found.${NC} Either not installed or no projects registered."
+        exit 0
+    fi
+
+    echo ""
+    echo -e "${BOLD}Registered projects:${NC}"
+    echo ""
+
+    local count=0
+    while IFS= read -r p; do
+        [[ -z "$p" ]] && continue
+        count=$((count + 1))
+        if [[ -d "$p" ]]; then
+            echo -e "  ${GREEN}✓${NC}  $p"
+        else
+            echo -e "  ${YELLOW}?${NC}  $p  (directory not found)"
+        fi
+    done < <(_get_meta_projects "$meta_file")
+
+    if [[ "$count" -eq 0 ]]; then
+        echo "  (none)"
+    fi
+    echo ""
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+_print_usage() {
+    cat <<EOF
+Usage: ./install.sh [OPTIONS]
+
+Options:
+  --add-project <path>    Register an existing project (symlink + VS Code tasks)
+  --list-projects         Show all registered projects
+  -h, --help              Show this help
+
+Without options, runs the full install/update flow.
+EOF
+}
+
 main() {
+    # Handle subcommands before the full install flow
+    case "${1:-}" in
+        --add-project)
+            if [[ -z "${2:-}" ]]; then
+                echo -e "${RED}Usage: ./install.sh --add-project <project-path>${NC}"
+                exit 1
+            fi
+            cmd_add_project "$2"
+            exit 0
+            ;;
+        --list-projects)
+            cmd_list_projects
+            exit 0
+            ;;
+        -h|--help)
+            _print_usage
+            exit 0
+            ;;
+    esac
+
     echo ""
     echo -e "${BLUE}${BOLD}CrossAI Installer v$VERSION${NC}"
     echo ""
