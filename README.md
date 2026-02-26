@@ -196,6 +196,33 @@ See [The Four Phases](docs/phases.md) for a full technical walkthrough.
 
 ---
 
+## Project context and information isolation
+
+CrossAI instructs agents not to browse your source code by default (see `--read-codebase`
+if you want to enable that explicitly). However, **Claude Code reads `CLAUDE.md` automatically
+from the working directory**. If you run CrossAI from inside an existing project, its
+`CLAUDE.md` will be loaded into Claude's system prompt and can influence the debate.
+
+**This is usually fine** — your coding conventions and architecture principles are often
+useful context. But if you want a completely clean slate (new idea, no codebase bias):
+
+**Option 1 — Run from an empty directory**
+
+```bash
+mkdir /tmp/my-idea && cd /tmp/my-idea
+python ~/.crossai/orchestrate.py --feature my-feature --prompt /path/to/prompt.md --phase ideation
+```
+
+Artifacts still land at the auto-detected project root (wherever your prompt lives, or
+specify with `--project-dir`).
+
+**Option 2 — Open VS Code or Cursor with just the prompt file**
+
+Open an empty workspace (no project folder) before running CrossAI tasks. Without a
+`CLAUDE.md` in the working directory, no project context is loaded.
+
+---
+
 ## Troubleshooting
 
 **`claude: command not found`**
