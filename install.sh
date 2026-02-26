@@ -111,6 +111,65 @@ copy_skill_files() {
 }
 
 # ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+
+# Create or update the .meta.json file at the install root.
+_write_meta() {
+    local meta_file="$1" install_type="$2"
+    python3 - <<PYEOF
+import json, datetime
+
+meta_file = '$meta_file'
+install_type = '$install_type'
+version = '$VERSION'
+now = datetime.datetime.now().isoformat(timespec='seconds')
+
+try:
+    with open(meta_file) as f:
+        data = json.load(f)
+    data['version'] = version
+    data['updated_at'] = now
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {
+        'version': version,
+        'install_type': install_type,
+        'installed_at': now,
+        'updated_at': now,
+        'vscode_projects': []
+    }
+
+with open(meta_file, 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+PYEOF
+}
+
+# Append a project path to vscode_projects in .meta.json (idempotent).
+_record_vscode_project() {
+    local meta_file="$1" project_path="$2"
+    python3 - <<PYEOF
+import json
+
+meta_file = '$meta_file'
+project_path = '$project_path'
+
+try:
+    with open(meta_file) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {'vscode_projects': []}
+
+projects = data.setdefault('vscode_projects', [])
+if project_path not in projects:
+    projects.append(project_path)
+    with open(meta_file, 'w') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
 # VS Code tasks
 # ---------------------------------------------------------------------------
 
@@ -171,6 +230,7 @@ handle_vscode_tasks() {
 
 install_user_level() {
     local dest="$HOME/.crossai"
+    local meta_file="$dest/.meta.json"
 
     echo ""
     echo -e "${BOLD}Installing CrossAI (user-level) → $dest${NC}"
@@ -182,6 +242,8 @@ install_user_level() {
     copy_skill_files \
         "$HOME/.claude/skills/crossai-conducting" \
         "$HOME/.codex/skills/crossai-challenging"
+
+    _write_meta "$meta_file" "user"
 
     # VS Code tasks — ask for target project path
     echo ""
@@ -196,6 +258,7 @@ install_user_level() {
             handle_vscode_tasks \
                 "$target_project/.vscode/tasks.json" \
                 '${env:HOME}/.crossai/orchestrate.py'
+            _record_vscode_project "$meta_file" "$target_project"
         fi
     fi
 
@@ -226,7 +289,7 @@ Next steps:
          --prompt prompt.md \\
          --phase ideation
 
-  Full docs: https://github.com/<your-org>/crossai
+  Full docs: https://github.com/Anandsharma1/crossai
 EOF
 }
 
@@ -234,6 +297,7 @@ install_repo_level() {
     local cwd
     cwd="$(pwd)"
     local dest="$cwd/cross_ai"
+    local meta_file="$dest/.meta.json"
 
     # Must be run from a git repo root
     if ! git -C "$cwd" rev-parse --show-toplevel &>/dev/null 2>&1; then
@@ -252,9 +316,12 @@ install_repo_level() {
         "$cwd/.claude/skills/crossai-conducting" \
         "$cwd/.codex/skills/crossai-challenging"
 
+    _write_meta "$meta_file" "repo"
+
     handle_vscode_tasks \
         "$cwd/.vscode/tasks.json" \
         "cross_ai/orchestrate.py"
+    _record_vscode_project "$meta_file" "$cwd"
 
     echo ""
     echo -e "${GREEN}${BOLD}CrossAI $VERSION installed.${NC}"

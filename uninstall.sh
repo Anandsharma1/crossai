@@ -18,6 +18,29 @@ _remove() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+
+# Print one project path per line from .meta.json; empty output if no meta.
+_get_meta_projects() {
+    local meta_file="$1"
+    python3 - <<PYEOF
+import json
+try:
+    with open('$meta_file') as f:
+        data = json.load(f)
+    for p in data.get('vscode_projects', []):
+        print(p)
+except Exception:
+    pass
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
+# Per-project cleanup helpers
+# ---------------------------------------------------------------------------
+
 # Remove CrossAI tasks and inputs from a .vscode/tasks.json, leaving other tasks intact.
 strip_vscode_tasks() {
     local tasks_file="$1"
@@ -46,8 +69,8 @@ data['tasks'] = [t for t in data.get('tasks', []) if t.get('label') not in CROSS
 removed = before - len(data['tasks'])
 
 data['inputs'] = [i for i in data.get('inputs', []) if i.get('id') not in CROSSAI_INPUT_IDS]
-if not data['inputs']:
-    del data['inputs']
+if not data.get('inputs'):
+    data.pop('inputs', None)
 
 with open('$tasks_file', 'w') as f:
     json.dump(data, f, indent=2)
@@ -58,7 +81,7 @@ PYEOF
     echo -e "  ${GREEN}✓${NC}  VS Code tasks cleaned: $tasks_file"
 }
 
-# Offer to remove .crossai/ generated debate artifacts from a given project dir.
+# Offer to remove .crossai/ generated debate artifacts from a project dir.
 offer_remove_artifacts() {
     local project_dir="$1"
     local artifacts_dir="$project_dir/.crossai"
@@ -75,7 +98,37 @@ offer_remove_artifacts() {
     fi
 }
 
+# Offer VS Code task cleanup and artifact removal for a single project.
+_cleanup_project() {
+    local project="$1"
+    echo ""
+    echo -e "  ${BOLD}Project: $project${NC}"
+    if [[ ! -d "$project" ]]; then
+        echo -e "  ${YELLOW}-${NC}  Directory no longer exists, skipping."
+        return
+    fi
+    if [[ -f "$project/.vscode/tasks.json" ]]; then
+        read -rp "  Remove CrossAI tasks from .vscode/tasks.json? [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] && strip_vscode_tasks "$project/.vscode/tasks.json"
+    fi
+    offer_remove_artifacts "$project"
+}
+
+# ---------------------------------------------------------------------------
+# Install modes
+# ---------------------------------------------------------------------------
+
 uninstall_user_level() {
+    local meta_file="$HOME/.crossai/.meta.json"
+
+    # Read project list BEFORE removing ~/.crossai (meta lives there)
+    local projects=()
+    if [[ -f "$meta_file" ]]; then
+        while IFS= read -r p; do
+            [[ -n "$p" ]] && projects+=("$p")
+        done < <(_get_meta_projects "$meta_file")
+    fi
+
     echo ""
     echo -e "${BOLD}Uninstalling CrossAI (user-level)...${NC}"
     echo ""
@@ -86,18 +139,22 @@ uninstall_user_level() {
     _remove "$HOME/.claude/skills/crossai-conducting"
     _remove "$HOME/.codex/skills/crossai-challenging"
 
-    # VS Code tasks — ask for project path
-    echo ""
-    read -rp "Remove CrossAI tasks from a project's .vscode/tasks.json? [y/N] " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-        local target_project
-        read -rp "Project path: " target_project
-        target_project="${target_project/#\~/$HOME}"
-        if [[ ! -d "$target_project" ]]; then
-            echo -e "  ${RED}✗${NC}  Directory not found: $target_project — skipping."
-        else
-            strip_vscode_tasks "$target_project/.vscode/tasks.json"
-            offer_remove_artifacts "$target_project"
+    # Project-level cleanup
+    if [[ ${#projects[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "${BOLD}Project cleanup (${#projects[@]} project(s) had CrossAI tasks installed):${NC}"
+        for project in "${projects[@]}"; do
+            _cleanup_project "$project"
+        done
+    else
+        # No metadata — fall back to asking
+        echo ""
+        read -rp "Remove CrossAI tasks from a project's .vscode/tasks.json? [y/N] " ans
+        if [[ "$ans" =~ ^[Yy]$ ]]; then
+            local target_project
+            read -rp "Project path: " target_project
+            target_project="${target_project/#\~/$HOME}"
+            [[ -d "$target_project" ]] && _cleanup_project "$target_project"
         fi
     fi
 
@@ -108,6 +165,16 @@ uninstall_user_level() {
 uninstall_repo_level() {
     local cwd
     cwd="$(pwd)"
+    local meta_file="$cwd/cross_ai/.meta.json"
+
+    # Read project list before removing cross_ai/
+    local projects=()
+    if [[ -f "$meta_file" ]]; then
+        while IFS= read -r p; do
+            [[ -n "$p" ]] && projects+=("$p")
+        done < <(_get_meta_projects "$meta_file")
+    fi
+
     echo ""
     echo -e "${BOLD}Uninstalling CrossAI (repo-level) from $cwd...${NC}"
     echo ""
@@ -118,18 +185,25 @@ uninstall_repo_level() {
     _remove "$cwd/.claude/skills/crossai-conducting"
     _remove "$cwd/.codex/skills/crossai-challenging"
 
-    # VS Code tasks — same project, strip automatically (with confirmation)
-    if [[ -f "$cwd/.vscode/tasks.json" ]]; then
+    # Project-level cleanup (for repo-level this is always the cwd)
+    if [[ ${#projects[@]} -gt 0 ]]; then
         echo ""
-        read -rp "Remove CrossAI tasks from .vscode/tasks.json? [y/N] " ans
-        [[ "$ans" =~ ^[Yy]$ ]] && strip_vscode_tasks "$cwd/.vscode/tasks.json"
+        echo -e "${BOLD}Project cleanup:${NC}"
+        for project in "${projects[@]}"; do
+            _cleanup_project "$project"
+        done
+    else
+        # No metadata — clean the current project directly
+        _cleanup_project "$cwd"
     fi
-
-    offer_remove_artifacts "$cwd"
 
     echo ""
     echo -e "${GREEN}CrossAI removed from this repo.${NC}"
 }
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 main() {
     echo ""
