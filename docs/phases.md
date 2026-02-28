@@ -1,7 +1,25 @@
-# The Four Phases
+# The Phases
 
-CrossAI runs a structured pipeline between Claude Code (conductor) and Codex CLI (challenger).
-Each phase builds on the previous one via artifact chaining.
+CrossAI runs structured Claude Code (conductor) ↔ Codex CLI (challenger) workflows.
+`generic` is standalone; the core build pipeline uses artifact chaining.
+
+---
+
+## Standalone Mode: Generic
+
+**Input:** Any task prompt (plain text file)
+**Output:** `.crossai/<feature>/generic/generic_summary.md` and per-round response artifacts
+
+**What happens:**
+- Round 0: both agents produce their direct answer to your task
+- Rounds 1+: each agent critiques the other and revises its own answer
+- Final round converges on a stronger, cross-verified response
+- No auto-chaining; this mode always starts from your explicit prompt
+
+**Command:**
+```bash
+python orchestrate.py --feature <name> --prompt task.md --phase generic [--rounds 3]
+```
 
 ---
 
@@ -91,6 +109,8 @@ ideation → plan → implement → review
             ↑ auto-reads ideation_summary.md
                        ↑ auto-reads plan_summary.md
 ```
+
+`generic` is standalone and does not chain to or from other phases.
 
 ## Codebase Access
 

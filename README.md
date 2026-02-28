@@ -3,7 +3,7 @@
 > Debate before you build. Run two AIs against each other until they agree on a plan — then implement it.
 
 CrossAI orchestrates a structured debate between **Claude Code** and **Codex CLI** across
-four phases — ideation, planning, implementation, and cross-review. Each AI independently
+five workflows — generic, ideation, planning, implementation, and cross-review. Each AI independently
 forms a position, critiques the other's work, and revises its own. By the time you write
 code, two separate intelligence systems have stress-tested the design.
 
@@ -26,6 +26,7 @@ $ python ~/.crossai/orchestrate.py --feature user-auth --prompt idea.md --phase 
 
 | Phase | Output |
 |-------|--------|
+| **Generic** | Improved responses for any prompt via cross-verification |
 | **Ideation** | Agreed direction: architecture, v1 scope, build sequence |
 | **Plan** | Full technical design: data model, API, security, work plan, tests |
 | **Implement** | Two independent implementations in separate git worktrees |
@@ -115,7 +116,13 @@ Refresh tokens are not required for v1.
 EOF
 ```
 
-**2. Run ideation** (3 rounds of debate, ~5 minutes)
+**2. Optional: run generic mode for any task** (for example, table descriptions)
+
+```bash
+python .crossai/orchestrate.py --feature table-descriptions --prompt prompt.md --phase generic
+```
+
+**3. Run ideation** (3 rounds of debate, ~5 minutes)
 
 ```bash
 # Repo-level install
@@ -132,19 +139,19 @@ CrossAI automatically detects the project root by looking for `.git/`, `.vscode/
 `pyproject.toml`, `package.json`, and similar markers — artifacts always land in
 `.crossai/<feature>/` at the detected root. Use `--project-dir /path` to override.
 
-**3. Run planning** (reads ideation output automatically)
+**4. Run planning** (reads ideation output automatically)
 
 ```bash
 python .crossai/orchestrate.py --feature user-auth --phase plan
 ```
 
-**4. Implement** (both agents in parallel git worktrees)
+**5. Implement** (both agents in parallel git worktrees)
 
 ```bash
 python .crossai/orchestrate.py --feature user-auth --phase implement --both
 ```
 
-**5. Cross-review**
+**6. Cross-review**
 
 ```bash
 python .crossai/orchestrate.py --feature user-auth --phase review
@@ -212,8 +219,8 @@ Runtime artifacts in your projects' `.crossai/` directories are left untouched.
 
 ## How it works
 
-Each phase follows a **heading contract** — a strict Markdown structure that makes
-the two agents' outputs directly comparable. The orchestrator:
+Each debate step follows a **prompt contract** so the two agents' outputs stay
+directly comparable while still allowing task-specific flexibility. The orchestrator:
 
 1. Sends both agents the same prompt (with full debate history from previous rounds)
 2. Saves each response as a dated artifact with metadata
@@ -222,7 +229,7 @@ the two agents' outputs directly comparable. The orchestrator:
 4. On the final round, uses a convergence prompt that pushes for concrete,
    implementable deliverables rather than continued debate
 
-See [The Four Phases](docs/phases.md) for a full technical walkthrough.
+See [The Phases](docs/phases.md) for a full technical walkthrough.
 
 ---
 

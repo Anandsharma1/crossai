@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 CrossAI v2
-Automates the "ideation → plan → implement → review" pipeline
-between Claude Code CLI and Codex CLI.
+Automates structured Claude Code CLI ↔ Codex CLI workflows.
 
 Usage:
+    python orchestrate.py --feature "feat" --prompt task.md --phase generic
     python orchestrate.py --feature "feat" --prompt idea.md --phase ideation
     python orchestrate.py --feature "feat" --phase plan --rounds 3
     python orchestrate.py --feature "feat" --phase implement --both
@@ -42,8 +42,9 @@ HISTORY_CHAR_LIMIT = 80_000  # Summarize older rounds when history exceeds this
 
 # Phase chain: each phase knows which previous phase to read from
 PHASE_CHAIN = {
-    "ideation": {"prev": None,       "prefix": "direction", "groom": "ideation",  "critique": "ideation_critique",  "revise": "ideation_revise",  "revise_final": "ideation_revise_final"},
-    "plan":     {"prev": "ideation",  "prefix": "plan",      "groom": "groom",     "critique": "critique",           "revise": "revise",           "revise_final": "revise_final"},
+    "generic":  {"prev": None,        "prefix": "response",  "groom": "generic",   "critique": "generic_critique",   "revise": "generic_revise",   "revise_final": "generic_revise_final", "scope_check": False},
+    "ideation": {"prev": None,        "prefix": "direction", "groom": "ideation",  "critique": "ideation_critique",  "revise": "ideation_revise",  "revise_final": "ideation_revise_final", "scope_check": True},
+    "plan":     {"prev": "ideation",  "prefix": "plan",      "groom": "groom",     "critique": "critique",           "revise": "revise",           "revise_final": "revise_final", "scope_check": True},
 }
 
 
@@ -446,7 +447,7 @@ def _parse_numbered_items(text: str) -> dict[int, str]:
 
 
 # ---------------------------------------------------------------------------
-# Generic Debate Loop (used by ideation, plan)
+# Generic Debate Loop (used by generic, ideation, plan)
 # ---------------------------------------------------------------------------
 
 def run_debate(feature: str, phase_name: str, initial_prompt: str,
@@ -656,6 +657,9 @@ def run_debate_phase(feature: str, phase_name: str, explicit_prompt: str = None,
             print(f"✗ --prompt is required for --phase {phase_name}.")
         sys.exit(1)
 
+    default_scope_check = config.get("scope_check", True)
+    effective_scope_check = scope_check and default_scope_check
+
     run_debate(
         feature=feature,
         phase_name=phase_name,
@@ -665,7 +669,7 @@ def run_debate_phase(feature: str, phase_name: str, explicit_prompt: str = None,
         revise_template=config["revise"],
         max_rounds=max_rounds,
         artifact_prefix=config["prefix"],
-        scope_check=scope_check,
+        scope_check=effective_scope_check,
         revise_final_template=config.get("revise_final"),
         read_codebase=read_codebase,
     )
@@ -896,16 +900,20 @@ def _find_project_root(explicit_dir: str | None) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CrossAI: Automate Claude ↔ Codex ideation, planning, and review",
+        description="CrossAI: Automate Claude ↔ Codex debate, planning, implementation, and review",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
-            Phases (run in order):
+            Phases / modes:
+              generic    Standalone task debate (any prompt) → improved responses
               ideation   Rough idea → Direction Summary via debate
               plan       Direction → Design & Implementation Plan via debate (auto-reads ideation)
               implement  Plan → code in worktrees
               review     Cross-review implementations
 
             Examples:
+              # Generic: debate any task prompt and converge on improved responses
+              python orchestrate.py --feature table-docs --prompt task.md --phase generic
+
               # Ideation: debate the idea into a direction summary
               python orchestrate.py --feature auth --prompt idea.md --phase ideation
 
@@ -938,7 +946,7 @@ def main():
     )
     parser.add_argument("--feature", required=True, help="Feature name (used as directory name)")
     parser.add_argument("--prompt", help="Path to initial prompt file")
-    parser.add_argument("--phase", choices=["ideation", "plan", "implement", "review"], default="ideation")
+    parser.add_argument("--phase", choices=["generic", "ideation", "plan", "implement", "review"], default="ideation")
     parser.add_argument("--rounds", type=int, default=3, help="Number of debate rounds (default: 3)")
     parser.add_argument("--agent", choices=["claude", "codex"], help="Which agent for implementation")
     parser.add_argument("--both", action="store_true", help="Run both agents for implementation")
@@ -956,7 +964,7 @@ def main():
     project_root = _find_project_root(args.project_dir)
     CROSSAI_DIR = project_root / _CROSSAI_DIRNAME
 
-    if args.phase in ("ideation", "plan"):
+    if args.phase in PHASE_CHAIN:
         explicit_prompt = None
         if args.prompt:
             prompt_path = Path(args.prompt)
