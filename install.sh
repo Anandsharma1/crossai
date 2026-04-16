@@ -95,19 +95,36 @@ confirm_update() {
 
 copy_core_files() {
     local dest="$1"
-    mkdir -p "$dest/prompts"
+    mkdir -p "$dest/prompts" "$dest/scripts"
     cp "$SCRIPT_DIR/orchestrate.py"        "$dest/orchestrate.py"
     chmod +x "$dest/orchestrate.py"
     cp -r "$SCRIPT_DIR/prompts/."          "$dest/prompts/"
+    cp -r "$SCRIPT_DIR/scripts/."          "$dest/scripts/"
+    chmod +x "$dest/scripts/"*.py
     cp "$SCRIPT_DIR/principles.example.md" "$dest/principles.example.md"
+    cp "$SCRIPT_DIR/README.md"             "$dest/README.md"
     echo "$VERSION"                        > "$dest/.version"
 }
 
 copy_skill_files() {
     local claude_dest="$1" codex_dest="$2"
     mkdir -p "$claude_dest" "$codex_dest"
-    cp "$SCRIPT_DIR/skills/claude/SKILL.md" "$claude_dest/SKILL.md"
+    cp "$SCRIPT_DIR/.claude/skills/crossai-conductor/SKILL.md" "$claude_dest/SKILL.md"
     cp "$SCRIPT_DIR/skills/codex/SKILL.md"  "$codex_dest/SKILL.md"
+}
+
+copy_command_files() {
+    # Install the /crossai-* slash commands for Claude Code.
+    local commands_dest="$1"
+    mkdir -p "$commands_dest"
+    local src="$SCRIPT_DIR/.claude/commands"
+    local count=0
+    for f in "$src"/crossai-*.md; do
+        [[ -f "$f" ]] || continue
+        cp "$f" "$commands_dest/"
+        count=$((count + 1))
+    done
+    echo -e "  ${GREEN}✓${NC}  Installed $count slash commands → $commands_dest"
 }
 
 # ---------------------------------------------------------------------------
@@ -239,6 +256,83 @@ handle_vscode_tasks() {
     fi
 }
 
+merge_claude_settings() {
+    local project_root="$1" hook_path="$2"
+    local settings_file="$project_root/.claude/settings.json"
+    mkdir -p "$(dirname "$settings_file")"
+    python3 - <<PYEOF
+import json
+from pathlib import Path
+
+settings_file = Path(r'''$settings_file''')
+hook_path = r'''$hook_path'''
+
+try:
+    data = json.loads(settings_file.read_text(encoding='utf-8'))
+    if not isinstance(data, dict):
+        raise ValueError("settings root must be an object")
+except Exception:
+    data = {}
+
+hooks = data.setdefault("hooks", {})
+entries = {
+    "SessionStart": {
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": f"python3 {hook_path} session-start",
+            "timeout": 10,
+        }],
+    },
+    "Stop": {
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": f"python3 {hook_path} stop-check",
+            "timeout": 10,
+        }],
+    },
+}
+
+def _is_crossai_command(cmd):
+    return "crossai_hook.py" in str(cmd)
+
+for event, entry in entries.items():
+    existing = hooks.get(event, [])
+    if not isinstance(existing, list):
+        existing = []
+    filtered = []
+    for item in existing:
+        if not isinstance(item, dict):
+            filtered.append(item)
+            continue
+        # Legacy broken shape: direct command dict at the top level — drop ours.
+        if "command" in item and "hooks" not in item:
+            if _is_crossai_command(item.get("command", "")):
+                continue
+            filtered.append(item)
+            continue
+        # Correct shape: matcher + hooks[]. Strip our command from the inner list.
+        inner = item.get("hooks")
+        if isinstance(inner, list):
+            inner_filtered = [
+                h for h in inner
+                if not (isinstance(h, dict) and _is_crossai_command(h.get("command", "")))
+            ]
+            if inner_filtered:
+                item = {**item, "hooks": inner_filtered}
+                filtered.append(item)
+            # else: drop the whole matcher group (it was ours-only)
+        else:
+            filtered.append(item)
+    filtered.append(entry)
+    hooks[event] = filtered
+
+settings_file.write_text(json.dumps(data, indent=2) + "\n", encoding='utf-8')
+PYEOF
+    echo -e "  ${GREEN}✓${NC}  Claude hooks merged into $settings_file"
+}
+
 # ---------------------------------------------------------------------------
 # Per-project setup (reusable for --add-project and install_user_level)
 # ---------------------------------------------------------------------------
@@ -264,16 +358,55 @@ _setup_project() {
     # Create artifact dir and symlink
     mkdir -p "$target_project/.crossai"
     local symlink="$target_project/.crossai/orchestrate.py"
+    local wrapper_symlink="$target_project/.crossai/crossai_cli.py"
+    local hook_symlink="$target_project/.crossai/crossai_hook.py"
     if [[ -L "$symlink" ]]; then
         ln -sf "$HOME/.crossai/orchestrate.py" "$symlink"
         echo -e "  ${GREEN}✓${NC}  Symlink updated: $symlink"
     elif [[ ! -e "$symlink" ]]; then
         ln -s "$HOME/.crossai/orchestrate.py" "$symlink"
         echo -e "  ${GREEN}✓${NC}  Shortcut created: $symlink"
-        echo -e "       Run with: python .crossai/orchestrate.py --feature ..."
+        echo -e "       Legacy run: python .crossai/orchestrate.py --feature ..."
     else
         echo -e "  ${YELLOW}-${NC}  $symlink exists and is not a symlink — skipping shortcut."
     fi
+
+    if [[ -L "$wrapper_symlink" ]]; then
+        ln -sf "$HOME/.crossai/scripts/crossai_cli.py" "$wrapper_symlink"
+        echo -e "  ${GREEN}✓${NC}  Wrapper symlink updated: $wrapper_symlink"
+    elif [[ ! -e "$wrapper_symlink" ]]; then
+        ln -s "$HOME/.crossai/scripts/crossai_cli.py" "$wrapper_symlink"
+        echo -e "  ${GREEN}✓${NC}  Wrapper shortcut created: $wrapper_symlink"
+        echo -e "       Run with: python3 .crossai/crossai_cli.py plan --feature ..."
+    else
+        echo -e "  ${YELLOW}-${NC}  $wrapper_symlink exists and is not a symlink — skipping wrapper shortcut."
+    fi
+
+    if [[ -L "$hook_symlink" ]]; then
+        ln -sf "$HOME/.crossai/scripts/crossai_hook.py" "$hook_symlink"
+        echo -e "  ${GREEN}✓${NC}  Hook symlink updated: $hook_symlink"
+    elif [[ ! -e "$hook_symlink" ]]; then
+        ln -s "$HOME/.crossai/scripts/crossai_hook.py" "$hook_symlink"
+        echo -e "  ${GREEN}✓${NC}  Hook shortcut created: $hook_symlink"
+    else
+        echo -e "  ${YELLOW}-${NC}  $hook_symlink exists and is not a symlink — skipping hook shortcut."
+    fi
+
+    # Symlink the CrossAI README so users have quickstart docs inside the project
+    local readme_symlink="$target_project/.crossai/README.md"
+    if [[ -f "$HOME/.crossai/README.md" ]]; then
+        if [[ -L "$readme_symlink" ]]; then
+            ln -sf "$HOME/.crossai/README.md" "$readme_symlink"
+            echo -e "  ${GREEN}✓${NC}  README symlink updated: $readme_symlink"
+        elif [[ ! -e "$readme_symlink" ]]; then
+            ln -s "$HOME/.crossai/README.md" "$readme_symlink"
+            echo -e "  ${GREEN}✓${NC}  Quickstart docs linked: $readme_symlink"
+        else
+            echo -e "  ${YELLOW}-${NC}  $readme_symlink exists and is not a symlink — skipping README link."
+        fi
+    fi
+
+    merge_claude_settings "$target_project" ".crossai/crossai_hook.py"
 
     if [[ "$with_vscode" == "true" ]]; then
         handle_vscode_tasks \
@@ -298,16 +431,18 @@ install_user_level() {
     [[ -f "$dest/.version" ]] && confirm_update "$dest"
 
     copy_core_files "$dest"
+    rm -rf "$HOME/.claude/skills/crossai-conducting"
     copy_skill_files \
-        "$HOME/.claude/skills/crossai-conducting" \
+        "$HOME/.claude/skills/crossai-conductor" \
         "$HOME/.codex/skills/crossai-challenging"
+    copy_command_files "$HOME/.claude/commands"
 
     _write_meta "$meta_file" "user"
 
     # Project registration — always ask; user can press Enter to skip
     echo ""
     echo -e "Register a project? This creates .crossai/ with a symlink in your"
-    echo -e "project so you can run: ${BOLD}python .crossai/orchestrate.py --feature ...${NC}"
+    echo -e "project so you can run: ${BOLD}python3 .crossai/crossai_cli.py plan --feature ...${NC}"
     read -rp "Project path (Enter to skip): " target_project
     if [[ -n "$target_project" ]]; then
         local with_vscode="false"
@@ -322,8 +457,10 @@ install_user_level() {
     echo -e "${GREEN}${BOLD}CrossAI $VERSION installed.${NC}"
     echo ""
     echo -e "  Skills registered:"
-    echo -e "    ~/.claude/skills/crossai-conducting/"
+    echo -e "    ~/.claude/skills/crossai-conductor/"
     echo -e "    ~/.codex/skills/crossai-challenging/"
+    echo -e "  Slash commands registered:"
+    echo -e "    ~/.claude/commands/crossai-*.md"
     echo ""
     _print_next_steps_user
 }
@@ -340,10 +477,9 @@ Next steps:
 
   3. Run ideation:
        cd /your/project
-       python ~/.crossai/orchestrate.py \\
+       python3 ~/.crossai/scripts/crossai_cli.py plan \\
          --feature my-feature \\
-         --prompt prompt.md \\
-         --phase ideation
+         --prompt prompt.md
 
   Full docs: https://github.com/Anandsharma1/crossai
 EOF
@@ -368,9 +504,14 @@ install_repo_level() {
     [[ -f "$dest/.version" ]] && confirm_update "$dest"
 
     copy_core_files "$dest"
+    rm -rf "$cwd/.claude/skills/crossai-conducting"
     copy_skill_files \
-        "$cwd/.claude/skills/crossai-conducting" \
+        "$cwd/.claude/skills/crossai-conductor" \
         "$cwd/.codex/skills/crossai-challenging"
+    copy_command_files "$cwd/.claude/commands"
+    mkdir -p "$cwd/.crossai"
+    ln -snf "../cross_ai/scripts/crossai_hook.py" "$cwd/.crossai/crossai_hook.py"
+    merge_claude_settings "$cwd" ".crossai/crossai_hook.py"
 
     _write_meta "$meta_file" "repo"
 
@@ -384,7 +525,10 @@ install_repo_level() {
     echo ""
     echo -e "  Files added to your repo:"
     echo -e "    cross_ai/"
-    echo -e "    .claude/skills/crossai-conducting/"
+    echo -e "    .crossai/crossai_hook.py"
+    echo -e "    .claude/skills/crossai-conductor/"
+    echo -e "    .claude/commands/crossai-*.md"
+    echo -e "    .claude/settings.json"
     echo -e "    .codex/skills/crossai-challenging/"
     echo -e "    .vscode/tasks.json"
     echo ""
@@ -405,10 +549,9 @@ Next steps:
        echo "Describe your feature here" > prompt.md
 
   3. Run ideation:
-       python cross_ai/orchestrate.py \\
+       python3 cross_ai/scripts/crossai_cli.py plan \\
          --feature my-feature \\
-         --prompt prompt.md \\
-         --phase ideation
+         --prompt prompt.md
 
   4. Commit the CrossAI files:
        git add cross_ai/ .claude/ .codex/ .vscode/tasks.json
@@ -439,7 +582,200 @@ cmd_add_project() {
     echo -e "${GREEN}Done.${NC} You can now run CrossAI from that project:"
     echo ""
     echo "  cd $project_path"
-    echo "  python .crossai/orchestrate.py --feature my-feature --prompt prompt.md --phase ideation"
+    echo "  python3 .crossai/crossai_cli.py plan --feature my-feature --prompt prompt.md"
+    echo ""
+}
+
+_unregister_project() {
+    local meta_file="$1" project_path="$2"
+    python3 - <<PYEOF
+import json
+
+meta_file = '$meta_file'
+project_path = '$project_path'
+
+try:
+    with open(meta_file) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {'vscode_projects': []}
+
+projects = data.setdefault('vscode_projects', [])
+if project_path in projects:
+    projects.remove(project_path)
+    with open(meta_file, 'w') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
+    print('removed')
+else:
+    print('not-registered')
+PYEOF
+}
+
+unmerge_claude_settings() {
+    local project_root="$1"
+    local settings_file="$project_root/.claude/settings.json"
+    [[ -f "$settings_file" ]] || return 0
+    python3 - <<PYEOF
+import json
+from pathlib import Path
+
+settings_file = Path(r'''$settings_file''')
+
+try:
+    data = json.loads(settings_file.read_text(encoding='utf-8'))
+    if not isinstance(data, dict):
+        raise ValueError
+except Exception:
+    raise SystemExit(0)
+
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    raise SystemExit(0)
+
+def _is_crossai_command(cmd):
+    return "crossai_hook.py" in str(cmd)
+
+changed = False
+for event in ("SessionStart", "Stop"):
+    existing = hooks.get(event)
+    if not isinstance(existing, list):
+        continue
+    filtered = []
+    for item in existing:
+        if not isinstance(item, dict):
+            filtered.append(item)
+            continue
+        # Legacy broken shape: direct command dict.
+        if "command" in item and "hooks" not in item:
+            if _is_crossai_command(item.get("command", "")):
+                continue
+            filtered.append(item)
+            continue
+        # Correct shape: matcher + hooks[].
+        inner = item.get("hooks")
+        if isinstance(inner, list):
+            inner_filtered = [
+                h for h in inner
+                if not (isinstance(h, dict) and _is_crossai_command(h.get("command", "")))
+            ]
+            if inner_filtered:
+                filtered.append({**item, "hooks": inner_filtered})
+            # else: whole matcher group was ours — drop it
+        else:
+            filtered.append(item)
+    if len(filtered) != len(existing):
+        changed = True
+    if filtered:
+        hooks[event] = filtered
+    else:
+        hooks.pop(event, None)
+        changed = True
+
+if changed and not hooks:
+    data.pop("hooks", None)
+
+if changed:
+    if data:
+        settings_file.write_text(json.dumps(data, indent=2) + "\n", encoding='utf-8')
+    else:
+        settings_file.unlink()
+PYEOF
+}
+
+unmerge_vscode_tasks() {
+    local project_root="$1"
+    local tasks_file="$project_root/.vscode/tasks.json"
+    [[ -f "$tasks_file" ]] || return 0
+    python3 - <<PYEOF
+import json
+from pathlib import Path
+
+tasks_file = Path(r'''$tasks_file''')
+
+try:
+    data = json.loads(tasks_file.read_text(encoding='utf-8'))
+    if not isinstance(data, dict):
+        raise ValueError
+except Exception:
+    raise SystemExit(0)
+
+tasks = data.get("tasks")
+if not isinstance(tasks, list):
+    raise SystemExit(0)
+
+filtered = [
+    t for t in tasks
+    if not (isinstance(t, dict) and str(t.get("label", "")).startswith("CrossAI:"))
+]
+if len(filtered) == len(tasks):
+    raise SystemExit(0)
+
+data["tasks"] = filtered
+tasks_file.write_text(json.dumps(data, indent=2) + "\n", encoding='utf-8')
+PYEOF
+}
+
+cmd_remove_project() {
+    local project_path="$1"
+    local meta_file="$HOME/.crossai/.meta.json"
+
+    project_path="${project_path/#\~/$HOME}"
+    # Resolve to absolute path if the directory still exists; otherwise keep
+    # the input as-is so stale registry entries can still be removed.
+    if [[ -d "$project_path" ]]; then
+        project_path="$(cd "$project_path" && pwd)"
+    fi
+
+    echo ""
+    echo -e "${BOLD}Removing project: $project_path${NC}"
+    echo ""
+
+    # 1. Unregister from metadata
+    if [[ -f "$meta_file" ]]; then
+        local status
+        status="$(_unregister_project "$meta_file" "$project_path")"
+        if [[ "$status" == "removed" ]]; then
+            echo -e "  ${GREEN}✓${NC}  Unregistered from $meta_file"
+        else
+            echo -e "  ${YELLOW}-${NC}  Not found in registry (continuing anyway)"
+        fi
+    fi
+
+    # 2. Remove our symlinks (only if they ARE symlinks — never touch real files)
+    if [[ -d "$project_path/.crossai" ]]; then
+        local link removed_any=0
+        for name in orchestrate.py crossai_cli.py crossai_hook.py README.md; do
+            link="$project_path/.crossai/$name"
+            if [[ -L "$link" ]]; then
+                rm "$link"
+                echo -e "  ${GREEN}✓${NC}  Removed symlink: .crossai/$name"
+                removed_any=1
+            fi
+        done
+        # If .crossai/ is now empty, clean it up. Otherwise keep feature artifacts.
+        if [[ "$removed_any" -eq 1 ]] && [[ -z "$(ls -A "$project_path/.crossai" 2>/dev/null)" ]]; then
+            rmdir "$project_path/.crossai"
+            echo -e "  ${GREEN}✓${NC}  Removed empty .crossai/ directory"
+        elif [[ -d "$project_path/.crossai" ]] && [[ -n "$(ls -A "$project_path/.crossai" 2>/dev/null)" ]]; then
+            echo -e "  ${YELLOW}-${NC}  Kept .crossai/ (contains debate artifacts)"
+        fi
+    fi
+
+    # 3. Strip CrossAI hook entries from .claude/settings.json
+    if [[ -f "$project_path/.claude/settings.json" ]]; then
+        unmerge_claude_settings "$project_path"
+        echo -e "  ${GREEN}✓${NC}  Cleaned Claude hooks from .claude/settings.json"
+    fi
+
+    # 4. Strip CrossAI: tasks from .vscode/tasks.json
+    if [[ -f "$project_path/.vscode/tasks.json" ]]; then
+        unmerge_vscode_tasks "$project_path"
+        echo -e "  ${GREEN}✓${NC}  Cleaned CrossAI tasks from .vscode/tasks.json"
+    fi
+
+    echo ""
+    echo -e "${GREEN}Done.${NC}"
     echo ""
 }
 
@@ -483,6 +819,7 @@ Usage: ./install.sh [OPTIONS]
 
 Options:
   --add-project <path>    Register an existing project (symlink + VS Code tasks)
+  --remove-project <path> Unregister a project and remove CrossAI symlinks / hooks
   --list-projects         Show all registered projects
   -h, --help              Show this help
 
@@ -499,6 +836,14 @@ main() {
                 exit 1
             fi
             cmd_add_project "$2"
+            exit 0
+            ;;
+        --remove-project)
+            if [[ -z "${2:-}" ]]; then
+                echo -e "${RED}Usage: ./install.sh --remove-project <project-path>${NC}"
+                exit 1
+            fi
+            cmd_remove_project "$2"
             exit 0
             ;;
         --list-projects)

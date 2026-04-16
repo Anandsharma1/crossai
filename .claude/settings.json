@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'if [ -f .crossai/crossai_hook.py ]; then python3 .crossai/crossai_hook.py session-start; elif [ -f cross_ai/scripts/crossai_hook.py ]; then python3 cross_ai/scripts/crossai_hook.py session-start; else python3 scripts/crossai_hook.py session-start; fi'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'if [ -f .crossai/crossai_hook.py ]; then python3 .crossai/crossai_hook.py stop-check; elif [ -f cross_ai/scripts/crossai_hook.py ]; then python3 cross_ai/scripts/crossai_hook.py stop-check; else python3 scripts/crossai_hook.py stop-check; fi'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

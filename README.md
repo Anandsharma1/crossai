@@ -7,6 +7,10 @@ five workflows — generic, ideation, planning, implementation, and cross-review
 forms a position, critiques the other's work, and revises its own. By the time you write
 code, two separate intelligence systems have stress-tested the design.
 
+CrossAI now has **two entrypoints**:
+- **Legacy orchestrator**: `orchestrate.py` for the original artifact-first workflow
+- **Claude-native wrapper**: `scripts/crossai_cli.py` plus project-local `.claude/` commands for native Claude Code usage, native Claude/Codex session reuse, and implementation-review loops
+
 ```
 $ python ~/.crossai/orchestrate.py --feature user-auth --prompt idea.md --phase ideation
 
@@ -31,6 +35,19 @@ $ python ~/.crossai/orchestrate.py --feature user-auth --prompt idea.md --phase 
 | **Plan** | Full technical design: data model, API, security, work plan, tests |
 | **Implement** | Two independent implementations in separate git worktrees |
 | **Review** | Each AI reviews the other's code against the agreed plan |
+
+---
+
+## Which entrypoint should I use?
+
+| Entry | Best for | Notes |
+|---|---|---|
+| `python3 scripts/crossai_cli.py ...` | Day-to-day use going forward | Supports native Claude/Codex session reuse, implementation-review loops, scope-policy control, and Claude-native commands in `.claude/` |
+| `python .crossai/orchestrate.py ...` | Backward compatibility and the original flow | Keeps the older artifact-first behavior and original interactive scope guard |
+
+If you are starting fresh on this repo, use **`scripts/crossai_cli.py`**.
+
+For the full Claude-native guide, see [Claude-native workflow](docs/claude-native.md).
 
 ---
 
@@ -63,10 +80,10 @@ The installer checks prerequisites, asks whether you want a **user-level** insta
 | | Repo-level | User-level |
 |---|---|---|
 | Debate artifacts (`.crossai/`) | Land in the project automatically | Auto-detected — land at the nearest project root (`.git/`, `.vscode/`, etc.) |
-| Running the tool | `python cross_ai/orchestrate.py` | `python ~/.crossai/orchestrate.py` or `python .crossai/orchestrate.py` (via symlink) |
+| Running the tool | `python3 cross_ai/scripts/crossai_cli.py` | `python3 ~/.crossai/scripts/crossai_cli.py` or `python3 .crossai/crossai_cli.py` (via symlink) |
 | Team setup | Everyone gets it on `git pull` | Each developer installs separately |
 | Updating CrossAI | Re-run `./install.sh` per project | Update once, all projects benefit |
-| Multiple projects | Duplicates files in each repo | Single copy, shared across all |
+| Multiple projects | Duplicates files in each repo | Single copy, shared across all — see [Adding CrossAI to a new project](#adding-crossai-to-a-new-project-user-level-install-already-done) |
 
 **Start with repo-level** if you're using CrossAI on a specific project — artifacts land where you expect them and the team gets it for free. Switch to user-level if you find yourself installing it across many repos frequently.
 
@@ -82,14 +99,41 @@ Prefer doing it by hand? See [Manual Installation](docs/manual-install.md).
 
 This single command does everything needed:
 - Creates `.crossai/` in the project and symlinks `orchestrate.py` back to `~/.crossai/`
+- Creates `.crossai/crossai_cli.py` as a shortcut to the installed wrapper
+- Creates `.crossai/crossai_hook.py` as a shortcut to the installed hook helper
+- Symlinks `.crossai/README.md` to the CrossAI quickstart so docs live with the project
+- Merges CrossAI hook entries into `.claude/settings.json`
 - Injects VS Code task shortcuts (`.vscode/tasks.json`)
 - Registers the project so `--list-projects` and uninstall can find it later
+
+**Registering several projects** — run the flag once per project. It's safe to
+re-run on a project you've already added; existing symlinks are refreshed and
+the registry is deduplicated.
+
+```bash
+./install.sh --add-project ~/projects/project-a
+./install.sh --add-project ~/projects/project-b
+./install.sh --add-project ~/work/service-c
+```
 
 To see all registered projects:
 
 ```bash
 ./install.sh --list-projects
 ```
+
+**Removing a project** — unregisters it and cleans up everything CrossAI added,
+without touching your debate artifacts:
+
+```bash
+./install.sh --remove-project ~/projects/project-a
+```
+
+This removes the symlinks (`.crossai/orchestrate.py`, `crossai_cli.py`,
+`crossai_hook.py`, `README.md`), strips CrossAI hook entries from `.claude/settings.json`,
+and removes `CrossAI:` tasks from `.vscode/tasks.json`. Feature artifacts under
+`.crossai/<feature>/` are preserved — delete that directory manually if you
+want a full wipe.
 
 **Manual alternative** — if you prefer doing it by hand or don't have the CrossAI
 repo cloned locally:
@@ -98,13 +142,103 @@ repo cloned locally:
 cd ~/projects/my-new-thing
 mkdir -p .crossai
 ln -s ~/.crossai/orchestrate.py .crossai/orchestrate.py
+ln -s ~/.crossai/scripts/crossai_cli.py .crossai/crossai_cli.py
+ln -s ~/.crossai/scripts/crossai_hook.py .crossai/crossai_hook.py
 ```
 
 From here, follow the usual [Getting started](#getting-started) workflow below.
 
 ---
 
-## Getting started
+## Quick start (recommended wrapper)
+
+These examples use the newer Claude-native wrapper.
+
+**1. Write your feature prompt**
+
+```bash
+cat > prompt.md <<'EOF'
+Add JWT-based user authentication to the API.
+Users sign up with email + password. Tokens expire after 24 hours.
+Refresh tokens are not required for v1.
+EOF
+```
+
+**2. Run ideation + planning with native debate sessions**
+
+```bash
+python3 scripts/crossai_cli.py plan \
+  --feature user-auth \
+  --prompt prompt.md \
+  --session-policy fresh \
+  --scope-policy adjudicate
+```
+
+This produces:
+- `.crossai/user-auth/ideation/...`
+- `.crossai/user-auth/plan/...`
+- `.crossai/user-auth/sessions.json`
+- `.crossai/user-auth/run_state.json`
+- scope artifacts such as `scope_candidates.md` and `scope_decisions.md`
+
+**3. Run implementation in a dedicated worktree**
+
+```bash
+python3 scripts/crossai_cli.py implement \
+  --feature user-auth \
+  --implementer claude \
+  --session-policy auto
+```
+
+**4. Run the implementation-review-fix loop**
+
+```bash
+python3 scripts/crossai_cli.py loop \
+  --feature user-auth \
+  --implementer claude \
+  --reviewer codex \
+  --passes 3 \
+  --implementer-session-policy auto \
+  --reviewer-session-policy fresh
+```
+
+**5. Inspect current state**
+
+```bash
+python3 scripts/crossai_cli.py status --feature user-auth
+```
+
+---
+
+## Claude Code usage
+
+When this repo is opened in Claude Code, the project-local commands under `.claude/commands/`
+are available:
+
+- `/crossai-generic`
+- `/crossai-plan`
+- `/crossai-implement`
+- `/crossai-loop`
+- `/crossai-status`
+
+The workflow guidance lives in `.claude/skills/crossai-conductor/`, and minimal hook wiring
+is configured in `.claude/settings.json`. Installed projects use `.crossai/crossai_hook.py`
+as the stable hook target, so the hook path works for repo-level and user-level installs.
+
+Examples inside Claude Code:
+
+```text
+/crossai-generic table-descriptions prompt.md --session-policy fresh
+/crossai-plan user-auth prompt.md --session-policy fresh --scope-policy adjudicate
+/crossai-implement user-auth --implementer claude --session-policy auto
+/crossai-loop user-auth --implementer claude --reviewer codex --passes 3
+```
+
+For a full operational guide, see [Claude-native workflow](docs/claude-native.md).
+
+---
+
+## Getting started (legacy orchestrator)
 
 **1. Write your feature prompt**
 
@@ -158,6 +292,161 @@ python .crossai/orchestrate.py --feature user-auth --phase review
 ```
 
 Artifacts land in `.crossai/user-auth/` at the detected project root.
+
+---
+
+## Wrapper CLI reference
+
+`scripts/crossai_cli.py` supports:
+
+| Command | Purpose |
+|---|---|
+| `generic` | Run standalone cross-verification for any task prompt |
+| `plan` | Run ideation + plan using native Claude/Codex debate sessions |
+| `implement` | Run implementation for one agent in a dedicated worktree |
+| `review` | Run a single review pass against an implementation |
+| `loop` | Run implement -> review -> fix iterations |
+| `status` | Show current CrossAI feature state |
+
+### `generic`
+
+```bash
+python3 scripts/crossai_cli.py generic --feature <name> --prompt <file> [options]
+```
+
+Options:
+- `--rounds <N>`: debate rounds, default `3`
+- `--session-policy auto|fresh|resume`
+- `--read-codebase`
+- `--project-dir <dir>`
+
+### `plan`
+
+```bash
+python3 scripts/crossai_cli.py plan --feature <name> --prompt <file> [options]
+```
+
+Options:
+- `--rounds <N>`: debate rounds, default `3`
+- `--session-policy auto|fresh|resume`: whether to reuse saved native debate sessions
+- `--scope-policy adjudicate|interactive|off`: how round-0 scope drift is handled
+- `--read-codebase`: allow agent codebase inspection during debate
+- `--no-scope-check`: shortcut for `--scope-policy off`
+- `--project-dir <dir>`: override project-root detection
+
+### `implement`
+
+```bash
+python3 scripts/crossai_cli.py implement --feature <name> [options]
+```
+
+Options:
+- `--implementer claude|codex`
+- `--session-policy auto|fresh|resume`
+- `--project-dir <dir>`
+
+### `review`
+
+```bash
+python3 scripts/crossai_cli.py review --feature <name> [options]
+```
+
+Options:
+- `--reviewer claude|codex`
+- `--target claude|codex`
+- `--pass-number <N>`
+- `--session-policy auto|fresh|resume`
+- `--display-mode inline|tmux`
+- `--project-dir <dir>`
+
+### `loop`
+
+```bash
+python3 scripts/crossai_cli.py loop --feature <name> [options]
+```
+
+Options:
+- `--implementer claude|codex`
+- `--reviewer claude|codex`
+- `--passes <N>`
+- `--implementer-session-policy auto|fresh|resume`
+- `--reviewer-session-policy auto|fresh|resume`
+- `--display-mode inline|tmux`
+- `--project-dir <dir>`
+
+### `status`
+
+```bash
+python3 scripts/crossai_cli.py status --feature <name>
+```
+
+Outputs the current feature state as JSON, including worktrees, saved sessions, and latest artifacts.
+
+---
+
+## Session and scope policies
+
+### Session policy
+
+Used by `plan` and `implement`, and separately for implementer/reviewer in `loop`.
+
+- `auto`: reuse a saved native session if one exists; otherwise start fresh
+- `fresh`: ignore saved native sessions and start a new one
+- `resume`: require an existing saved native session and continue it
+
+Use `fresh` when you want a clean re-run, and `resume` when you explicitly want continuity.
+
+### Scope policy
+
+Used by `plan`.
+
+- `adjudicate`: default; Claude and Codex classify possible scope drift after round 0, then CrossAI merges the result into `scope_decisions.md`
+- `interactive`: present candidate drift items and let you exclude them manually
+- `off`: disable scope drift handling
+
+The adjudication flow writes:
+- `.crossai/<feature>/<phase>/scope_candidates.md`
+- `.crossai/<feature>/<phase>/scope_adjudication.claude.md`
+- `.crossai/<feature>/<phase>/scope_adjudication.codex.md`
+- `.crossai/<feature>/<phase>/scope_decisions.md`
+
+The final `scope_decisions.md` is then injected into subsequent debate rounds as constraints.
+
+---
+
+## CLI options reference
+
+`orchestrate.py` supports the following flags:
+
+| Flag | Required | Applies to | Default | Notes |
+|---|---|---|---|---|
+| `--feature <name>` | Yes | all phases | n/a | Feature slug used for artifact paths (`.crossai/<feature>/...`). |
+| `--phase <generic\|ideation\|plan\|implement\|review>` | No | all phases | `ideation` | Main workflow selector. |
+| `--prompt <file>` | Sometimes | `generic`, `ideation`, optional in `plan` | n/a | Required for `generic` + `ideation`; `plan` can auto-chain from ideation outputs. |
+| `--rounds <int>` | No | debate phases (`generic`, `ideation`, `plan`) | `3` | Number of rounds. `1` means groom only (no critique/revise rounds). |
+| `--no-scope-check` | No | `ideation`, `plan` | off | Skips the interactive scope guard after round 0. (`generic` already has scope check disabled.) |
+| `--read-codebase` | No | debate phases (`generic`, `ideation`, `plan`) | off | Enables Claude tools in debate (`--max-turns 10`) so it can inspect code/files. |
+| `--project-dir <dir>` | No | all phases | auto-detect | Overrides project-root detection for artifact placement. |
+| `--agent <claude\|codex>` | Conditional | `implement` | n/a | Run implementation for one agent only. |
+| `--both` | Conditional | `implement` | off | Run implementations for both Claude and Codex in separate worktrees. |
+
+`implement` requires either `--agent` or `--both`.
+
+Examples:
+
+```bash
+# Debate with codebase reading enabled
+python .crossai/orchestrate.py --feature user-auth --prompt prompt.md --phase ideation --read-codebase
+
+# Skip scope confirmation prompts
+python .crossai/orchestrate.py --feature user-auth --phase plan --no-scope-check
+
+# Put artifacts under a specific repo root
+python .crossai/orchestrate.py --feature user-auth --prompt prompt.md --phase generic --project-dir ~/projects/my-repo
+
+# Fast single-round idea pass
+python .crossai/orchestrate.py --feature user-auth --prompt prompt.md --phase ideation --rounds 1
+```
 
 ---
 
@@ -220,7 +509,11 @@ Runtime artifacts in your projects' `.crossai/` directories are left untouched.
 ## How it works
 
 Each debate step follows a **prompt contract** so the two agents' outputs stay
-directly comparable while still allowing task-specific flexibility. The orchestrator:
+directly comparable while still allowing task-specific flexibility.
+
+### Legacy orchestrator
+
+The original orchestrator:
 
 1. Sends both agents the same prompt (with full debate history from previous rounds)
 2. Saves each response as a dated artifact with metadata
@@ -229,7 +522,35 @@ directly comparable while still allowing task-specific flexibility. The orchestr
 4. On the final round, uses a convergence prompt that pushes for concrete,
    implementable deliverables rather than continued debate
 
+### Claude-native wrapper
+
+The newer wrapper:
+
+1. Starts or resumes native Claude/Codex sessions based on session policy
+2. Writes artifacts for every debate, implementation, and review step
+3. Persists feature state in:
+   - `.crossai/<feature>/sessions.json`
+   - `.crossai/<feature>/run_state.json`
+4. For planning, optionally resolves scope drift using:
+   - agent adjudication (`adjudicate`)
+   - manual exclusions (`interactive`)
+   - no scope handling (`off`)
+5. For implementation loops, keeps the implementer session sticky while allowing reviewer sessions to be fresh, resumed, or auto-reused depending on flags
+
+### Artifact model
+
+Common artifact families now include:
+
+- debate artifacts under `.crossai/<feature>/ideation/` and `.crossai/<feature>/plan/`
+- implementation logs under `.crossai/<feature>/implementation/`
+- review artifacts under `.crossai/<feature>/reviews/`
+- scope artifacts under `.crossai/<feature>/<phase>/scope_*.md`
+- state files:
+  - `.crossai/<feature>/sessions.json`
+  - `.crossai/<feature>/run_state.json`
+
 See [The Phases](docs/phases.md) for a full technical walkthrough.
+For the newer wrapper-centric model, see [Claude-native workflow](docs/claude-native.md).
 
 ---
 
@@ -271,6 +592,10 @@ Install Codex CLI: https://github.com/openai/codex
 **`python3: version too old`**
 CrossAI requires Python 3.10+. Install via your distro or https://python.org.
 
+**`python: command not found`**
+Use `python3` for the new wrapper commands. The repository examples for `scripts/crossai_cli.py`
+assume `python3`.
+
 **`git worktree` errors during implement phase**
 Ensure you're running from inside a git repository. CrossAI creates worktrees
 relative to the repo root.
@@ -279,16 +604,21 @@ relative to the repo root.
 Default timeout is 300s per agent. Large plans with long history can hit this.
 Run with fewer rounds (`--rounds 1`) or from a clean state.
 
-**`Error: Reached max turns (6)` in Claude output**
-This means Claude spent all its allowed turns on tool calls (reading files,
-searching the codebase) instead of generating the debate response.
+**`Error: Reached max turns (1)` in Claude output**
+In debate phases, this usually means your prompt asked Claude to read files or inspect code,
+but tools were disabled (default mode is `--tools "" --max-turns 1` for Claude debate calls).
 
-As of the latest version, this is fixed: debate-phase calls run with tools
-disabled (`--tools "" --max-turns 1`) so Claude produces text in a single turn.
-If you're on an older version, update your `orchestrate.py`.
+Options:
+- Enable codebase access for debate: add `--read-codebase`
+- Keep the prompt self-contained (don't require browsing local files)
+- If you want a clean no-context run, start from an empty directory to avoid extra
+  environment instructions influencing tool use
 
-If you're using `--read-codebase` (tools enabled) and still hitting this, Claude
-may be exploring too many files. Options:
+**`Error: Reached max turns (N)` where `N > 1`**
+This usually happens when tools are enabled and Claude spends turns exploring files
+instead of producing the final response.
+
+If you're using `--read-codebase`, options:
 - Increase the max-turns limit in `run_claude()` (the `allow_tools=True` branch
   defaults to 10 — raise it if your codebase is large)
 - Narrow your prompt so Claude doesn't need to read as many files
@@ -297,6 +627,15 @@ may be exploring too many files. Options:
 **Debate history truncated unexpectedly**
 History auto-summarizes when it exceeds ~80k characters. This is expected behavior.
 The summary is injected as context for subsequent rounds.
+
+**Why did debate continue without asking me about scope?**
+If you are using `scripts/crossai_cli.py plan`, scope handling depends on `--scope-policy`:
+- `adjudicate`: agents decide and document drift
+- `interactive`: you are prompted
+- `off`: no scope handling
+
+**Where are native session ids stored?**
+In `.crossai/<feature>/sessions.json`. Claude entries store `session_id`; Codex entries store `thread_id`.
 
 ---
 
