@@ -39,6 +39,7 @@ CLAUDE_TIMEOUT = 300
 CODEX_TIMEOUT = 300
 MAX_RETRIES = 2
 HISTORY_CHAR_LIMIT = 80_000  # Summarize older rounds when history exceeds this
+FEATURE_SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 # Phase chain: each phase knows which previous phase to read from
 PHASE_CHAIN = {
@@ -55,6 +56,11 @@ class Agent(str, Enum):
 
 class CLITimeoutError(Exception):
     """Raised when a CLI call fails after all retries are exhausted."""
+    pass
+
+
+class ArtifactError(Exception):
+    """Raised when a required CrossAI artifact is missing."""
     pass
 
 
@@ -182,6 +188,16 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def validate_feature_slug(feature: str):
+    if not FEATURE_SLUG_RE.fullmatch(feature):
+        print("✗ --feature must match [A-Za-z0-9][A-Za-z0-9._-]* and must not contain spaces or path separators.")
+        sys.exit(1)
+
+
+def stdin_is_tty() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 # ---------------------------------------------------------------------------
 # Debate Log
 # ---------------------------------------------------------------------------
@@ -285,6 +301,12 @@ def _run_cli(cmd: list, label: str, timeout: int, cwd: str = None, retries: int 
         except FileNotFoundError:
             print(f"  ✗ {label} CLI not found. Is '{cmd[0]}' installed and on PATH?")
             sys.exit(1)
+        except OSError as exc:
+            if proc:
+                proc.kill()
+                proc.wait()
+            print(f"  ✗ {label} failed to start or communicate: {exc}")
+            sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +317,10 @@ def assemble_prompt(template_name: str, variables: dict) -> str:
     template = load_prompt_template(template_name)
     for key, value in variables.items():
         template = template.replace(f"{{{{{key}}}}}", str(value))
+    unresolved = sorted(set(re.findall(r"{{([A-Za-z0-9_]+)}}", template)))
+    if unresolved:
+        print(f"  ✗ Prompt template '{template_name}' still has unresolved variables: {', '.join(unresolved)}")
+        sys.exit(1)
     return template
 
 def get_principles(feature: str) -> str:
@@ -342,6 +368,10 @@ def _scope_check(initial_prompt: str, claude_output: str, codex_output: str) -> 
 
     if "NO_SCOPE_ISSUES" in result:
         print("\n  ✓ No significant scope deviations detected.\n")
+        return None
+
+    if not stdin_is_tty():
+        print("  ⚠ Scope check requires an interactive terminal. Continuing without exclusions.")
         return None
 
     print(f"\n{result}\n")
@@ -446,6 +476,14 @@ def _parse_numbered_items(text: str) -> dict[int, str]:
     return items
 
 
+def _read_existing_artifact(candidates: list[Path], description: str) -> str:
+    for candidate in candidates:
+        if candidate.exists():
+            return read_file(candidate)
+    tried = "\n".join(f"    - {candidate}" for candidate in candidates)
+    raise ArtifactError(f"missing {description}. Checked:\n{tried}")
+
+
 # ---------------------------------------------------------------------------
 # Generic Debate Loop (used by generic, ideation, plan)
 # ---------------------------------------------------------------------------
@@ -522,11 +560,37 @@ def run_debate(feature: str, phase_name: str, initial_prompt: str,
 
             prev_rdir = round_dir(feature, phase_name, r - 1)
             if r == 1:
-                latest_claude = read_file(prev_rdir / f"claude.{artifact_prefix}.md")
-                latest_codex = read_file(prev_rdir / f"codex.{artifact_prefix}.md")
+                latest_claude = _read_existing_artifact(
+                    [
+                        prev_rdir / f"claude.{artifact_prefix}.md",
+                        round_dir(feature, phase_name, 0) / f"claude.{artifact_prefix}.md",
+                    ],
+                    f"previous Claude {artifact_prefix} artifact for round {r}",
+                )
+                latest_codex = _read_existing_artifact(
+                    [
+                        prev_rdir / f"codex.{artifact_prefix}.md",
+                        round_dir(feature, phase_name, 0) / f"codex.{artifact_prefix}.md",
+                    ],
+                    f"previous Codex {artifact_prefix} artifact for round {r}",
+                )
             else:
-                latest_claude = read_file(prev_rdir / f"claude.revised_{artifact_prefix}.md")
-                latest_codex = read_file(prev_rdir / f"codex.revised_{artifact_prefix}.md")
+                latest_claude = _read_existing_artifact(
+                    [
+                        prev_rdir / f"claude.revised_{artifact_prefix}.md",
+                        prev_rdir / f"claude.{artifact_prefix}.md",
+                        round_dir(feature, phase_name, 0) / f"claude.{artifact_prefix}.md",
+                    ],
+                    f"previous Claude {artifact_prefix} artifact for round {r}",
+                )
+                latest_codex = _read_existing_artifact(
+                    [
+                        prev_rdir / f"codex.revised_{artifact_prefix}.md",
+                        prev_rdir / f"codex.{artifact_prefix}.md",
+                        round_dir(feature, phase_name, 0) / f"codex.{artifact_prefix}.md",
+                    ],
+                    f"previous Codex {artifact_prefix} artifact for round {r}",
+                )
 
             conversation_history = history.format()
 
@@ -593,6 +657,15 @@ def run_debate(feature: str, phase_name: str, initial_prompt: str,
         print(f"  Debate log: {pdir}/debate.log.md")
         print(f"{'='*60}")
         sys.exit(1)
+    except ArtifactError as e:
+        log.save()
+        print(f"\n{'='*60}")
+        print(f"✗ {phase_name.title()} ABORTED: {e}")
+        print(f"  Rounds completed before failure: {rounds_completed}/{max_rounds}")
+        print(f"  Partial artifacts saved in: {pdir}/")
+        print(f"  Debate log: {pdir}/debate.log.md")
+        print(f"{'='*60}")
+        sys.exit(1)
 
     log.save()
 
@@ -603,6 +676,7 @@ def run_debate(feature: str, phase_name: str, initial_prompt: str,
 - Date: {timestamp()}
 - Phase: {phase_name}
 - Rounds completed: {max_rounds}
+- Debate mode: {"groom only" if max_rounds == 1 else "full debate"}
 - Final Claude {artifact_prefix}: {final_rdir}/claude.revised_{artifact_prefix}.md
 - Final Codex {artifact_prefix}: {final_rdir}/codex.revised_{artifact_prefix}.md
 - Full debate log: {pdir}/debate.log.md
@@ -762,7 +836,9 @@ def _setup_worktree(path: str, branch: str):
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        print(f"    ⚠ Worktree creation failed: {result.stderr}")
+        details = (result.stderr or result.stdout).strip()
+        print(f"    ✗ Worktree creation failed: {details}")
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -959,6 +1035,9 @@ def main():
                         help="Project root for artifact placement (default: auto-detected)")
 
     args = parser.parse_args()
+    validate_feature_slug(args.feature)
+    if args.rounds < 1:
+        parser.error("--rounds must be >= 1")
 
     global CROSSAI_DIR
     project_root = _find_project_root(args.project_dir)
@@ -967,7 +1046,7 @@ def main():
     if args.phase in PHASE_CHAIN:
         explicit_prompt = None
         if args.prompt:
-            prompt_path = Path(args.prompt)
+            prompt_path = Path(args.prompt).expanduser().resolve()
             if not prompt_path.exists():
                 parser.error(f"Prompt file not found: {prompt_path}")
             explicit_prompt = read_file(prompt_path)

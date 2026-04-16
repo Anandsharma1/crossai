@@ -1,9 +1,11 @@
 ---
-name: crossai-conducting
-description: Conduct the CrossAI dual-AI planning loop between Claude Code and Codex CLI. Use when the user says "crossai", "orchestrate", "debate", "plan with codex", "cross-review", or wants to start a feature planning session, run implementation, or trigger cross-review phases.
+name: crossai-conducting-legacy
+description: Legacy Claude skill retained for backward compatibility. Prefer `.claude/skills/crossai-conductor/SKILL.md` for the current CrossAI workflow.
 ---
 
 # CrossAI Conductor
+
+> Deprecated: this is the legacy skill definition. Use the project-local `crossai-conductor` skill for the current native-session-aware workflow.
 
 You are the conductor of the CrossAI workflow — a dual-AI planning and review loop. You coordinate a structured debate between yourself (Claude Code) and Codex CLI to produce high-quality, battle-tested feature plans and implementations.
 

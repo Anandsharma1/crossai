@@ -42,7 +42,8 @@ Use this when you want CrossAI available across all your projects.
 
 ```bash
 mkdir -p ~/.crossai/prompts
-mkdir -p ~/.claude/skills/crossai-conducting
+mkdir -p ~/.crossai/scripts
+mkdir -p ~/.claude/skills/crossai-conductor
 mkdir -p ~/.codex/skills/crossai-challenging
 ```
 
@@ -52,13 +53,15 @@ mkdir -p ~/.codex/skills/crossai-challenging
 cp orchestrate.py         ~/.crossai/orchestrate.py
 chmod +x                  ~/.crossai/orchestrate.py
 cp -r prompts/.           ~/.crossai/prompts/
+cp -r scripts/.           ~/.crossai/scripts/
+chmod +x                  ~/.crossai/scripts/*.py
 cp principles.example.md  ~/.crossai/principles.example.md
 ```
 
 ### 3. Copy the skills
 
 ```bash
-cp skills/claude/SKILL.md  ~/.claude/skills/crossai-conducting/SKILL.md
+cp .claude/skills/crossai-conductor/SKILL.md  ~/.claude/skills/crossai-conductor/SKILL.md
 cp skills/codex/SKILL.md   ~/.codex/skills/crossai-challenging/SKILL.md
 ```
 
@@ -80,17 +83,43 @@ and a symlink so you can run the tool with a short path:
 ```bash
 mkdir -p /your/project/.crossai
 ln -s ~/.crossai/orchestrate.py /your/project/.crossai/orchestrate.py
+ln -s ~/.crossai/scripts/crossai_cli.py /your/project/.crossai/crossai_cli.py
+ln -s ~/.crossai/scripts/crossai_hook.py /your/project/.crossai/crossai_hook.py
 ```
 
 Now from the project root you can run:
 
 ```bash
 cd /your/project
-python .crossai/orchestrate.py --feature my-feature --prompt prompt.md --phase ideation
+python3 .crossai/crossai_cli.py plan --feature my-feature --prompt prompt.md
 ```
 
 CrossAI auto-detects the project root from `.git/`, `.vscode/`, `pyproject.toml`, etc.
 Use `--project-dir /path/to/project` to override.
+
+If you want Claude Code hooks in that project, add or merge this into
+`/your/project/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python3 .crossai/crossai_hook.py session-start",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 .crossai/crossai_hook.py stop-check",
+        "timeout": 10
+      }
+    ]
+  }
+}
+```
 
 ### 6. (Optional) Inject VS Code tasks
 
@@ -111,7 +140,9 @@ with `${env:HOME}/.crossai/orchestrate.py`.
 > **Note:** Projects added manually (without `--add-project`) won't appear in
 > `./install.sh --list-projects` and won't be auto-cleaned during uninstall.
 > You can still uninstall manually by removing the `.crossai/orchestrate.py`
-> symlink and the CrossAI entries from `.vscode/tasks.json`.
+> and `.crossai/crossai_cli.py`
+> and `.crossai/crossai_hook.py`
+> symlink and the CrossAI entries from `.vscode/tasks.json` and `.claude/settings.json`.
 
 ---
 
@@ -124,7 +155,8 @@ Run all commands from your **project root**.
 
 ```bash
 mkdir -p cross_ai/prompts
-mkdir -p .claude/skills/crossai-conducting
+mkdir -p cross_ai/scripts
+mkdir -p .claude/skills/crossai-conductor
 mkdir -p .codex/skills/crossai-challenging
 mkdir -p .vscode
 ```
@@ -135,13 +167,15 @@ mkdir -p .vscode
 cp /path/to/crossai/orchestrate.py         cross_ai/orchestrate.py
 chmod +x                                   cross_ai/orchestrate.py
 cp -r /path/to/crossai/prompts/.           cross_ai/prompts/
+cp -r /path/to/crossai/scripts/.           cross_ai/scripts/
+chmod +x                                   cross_ai/scripts/*.py
 cp /path/to/crossai/principles.example.md  cross_ai/principles.example.md
 ```
 
 ### 3. Copy the skills
 
 ```bash
-cp /path/to/crossai/skills/claude/SKILL.md  .claude/skills/crossai-conducting/SKILL.md
+cp /path/to/crossai/.claude/skills/crossai-conductor/SKILL.md  .claude/skills/crossai-conductor/SKILL.md
 cp /path/to/crossai/skills/codex/SKILL.md   .codex/skills/crossai-challenging/SKILL.md
 ```
 
@@ -183,8 +217,9 @@ cd /path/to/crossai
 git pull
 cp orchestrate.py         ~/.crossai/orchestrate.py
 cp -r prompts/.           ~/.crossai/prompts/
+cp -r scripts/.           ~/.crossai/scripts/
 cp principles.example.md  ~/.crossai/principles.example.md
-cp skills/claude/SKILL.md ~/.claude/skills/crossai-conducting/SKILL.md
+cp .claude/skills/crossai-conductor/SKILL.md ~/.claude/skills/crossai-conductor/SKILL.md
 cp skills/codex/SKILL.md  ~/.codex/skills/crossai-challenging/SKILL.md
 cat VERSION > ~/.crossai/.version
 ```
@@ -207,7 +242,7 @@ git pull
 
 ```bash
 rm -rf ~/.crossai
-rm -rf ~/.claude/skills/crossai-conducting
+rm -rf ~/.claude/skills/crossai-conductor
 rm -rf ~/.codex/skills/crossai-challenging
 ```
 
@@ -215,6 +250,7 @@ For each project where you created a shortcut (step 5 above), remove the symlink
 
 ```bash
 rm /your/project/.crossai/orchestrate.py
+rm /your/project/.crossai/crossai_cli.py
 ```
 
 Runtime artifacts in your projects' `.crossai/` directories are not touched.
@@ -224,7 +260,7 @@ Delete them manually if you no longer need them.
 
 ```bash
 rm -rf cross_ai/
-rm -rf .claude/skills/crossai-conducting
+rm -rf .claude/skills/crossai-conductor
 rm -rf .codex/skills/crossai-challenging
 # Edit .vscode/tasks.json to remove CrossAI tasks if desired.
 ```
