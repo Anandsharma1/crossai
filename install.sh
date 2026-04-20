@@ -347,11 +347,14 @@ _setup_project() {
     local meta_file="$HOME/.crossai/.meta.json"
 
     target_project="${target_project/#\~/$HOME}"   # expand leading ~
+    target_project="${target_project%\$}"          # strip trailing $ (shell-prompt bleed)
+    target_project="${target_project%/}"           # strip trailing slash
     # Resolve to absolute path
+    local original_path="$target_project"
     target_project="$(cd "$target_project" 2>/dev/null && pwd)"
 
     if [[ ! -d "$target_project" ]]; then
-        echo -e "  ${RED}✗${NC}  Directory not found: $target_project"
+        echo -e "  ${RED}✗${NC}  Directory not found: ${original_path:-<empty path>}"
         return 1
     fi
 
@@ -565,6 +568,8 @@ EOF
 
 cmd_add_project() {
     local project_path="$1"
+    project_path="${project_path%\$}"   # strip trailing $ (shell-prompt bleed)
+    project_path="${project_path%/}"    # strip trailing slash
 
     if [[ ! -f "$HOME/.crossai/.version" ]]; then
         echo -e "${RED}CrossAI is not installed at user level (~/.crossai/).${NC}"
@@ -721,6 +726,8 @@ cmd_remove_project() {
     local meta_file="$HOME/.crossai/.meta.json"
 
     project_path="${project_path/#\~/$HOME}"
+    project_path="${project_path%\$}"   # strip trailing $ (shell-prompt bleed)
+    project_path="${project_path%/}"    # strip trailing slash
     # Resolve to absolute path if the directory still exists; otherwise keep
     # the input as-is so stale registry entries can still be removed.
     if [[ -d "$project_path" ]]; then
