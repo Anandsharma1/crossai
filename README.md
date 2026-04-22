@@ -63,6 +63,23 @@ For the full Claude-native guide, see [Claude-native workflow](docs/claude-nativ
 
 ---
 
+## Which models does CrossAI use?
+
+CrossAI does **not** pin a model for either agent. It shells out to the underlying CLIs (`claude` and `codex`) without a `--model` flag, so each agent uses whatever its own CLI is configured to use.
+
+| Agent | How the model is chosen | Where to change it |
+|-------|-------------------------|--------------------|
+| **Claude** | Inherits the Claude Code CLI default | `~/.claude/settings.json` → `"model"` key (e.g. `"opus"`, `"sonnet"`, or a full model ID) |
+| **Codex** | Inherits the Codex CLI default | `~/.codex/config.toml` → `model = "..."` and `model_reasoning_effort = "..."` |
+
+To override for a single run without changing global config:
+- **Codex**: edit the `codex exec` invocation in `scripts/crossai_cli.py` (see `run_codex_session`) to pass `-c model="gpt-5.4"` or similar.
+- **Claude**: add `--model <id>` to the `claude -p` invocation in `run_claude_session` in the same file.
+
+If you want reproducible cross-machine behavior, pin the model in each CLI's config rather than relying on whatever default happens to be active.
+
+---
+
 ## Install
 
 ```bash
