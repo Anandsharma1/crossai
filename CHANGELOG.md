@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - `orchestrate.py` no longer hardcodes the `codex` binary — it now respects `CROSSAI_CODEX_CMD`, matching `crossai_cli.py`.
+- `crossai_cli.py` now pipes the prompt to `claude`/`codex` via stdin instead of passing it as an argv argument. Large debate prompts previously overflowed the per-argument `MAX_ARG_STRLEN` cap (~128 KB on Linux) and failed with `E2BIG`. The prompt is written on a daemon thread to avoid a pipe-buffer deadlock while stdout streams.
 
 ---
 

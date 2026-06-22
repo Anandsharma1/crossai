@@ -12,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -280,19 +281,50 @@ def terminate_process(proc: subprocess.Popen[bytes]) -> str:
     return tail
 
 
+def _feed_stdin(stream, data: bytes) -> None:
+    try:
+        stream.write(data)
+        stream.flush()
+    except OSError:
+        pass
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
+
+
 def stream_command(
-    cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    input_data: str | None = None,
 ) -> str:
     print(f"$ {quote_cmd(cmd)}")
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd) if cwd else None,
         env=env,
+        stdin=subprocess.PIPE if input_data is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=False,
         bufsize=0,
     )
+
+    # Large prompts must be piped via stdin: a single argv argument is capped at
+    # MAX_ARG_STRLEN (~128 KB on Linux) and overflows with E2BIG. Write on a
+    # daemon thread so a child that streams stdout while we feed stdin can't
+    # deadlock against a full pipe buffer.
+    if input_data is not None:
+        assert proc.stdin is not None
+        writer = threading.Thread(
+            target=_feed_stdin,
+            args=(proc.stdin, input_data.encode("utf-8")),
+            daemon=True,
+        )
+        writer.start()
 
     chunks: list[str] = []
     assert proc.stdout is not None
@@ -363,10 +395,15 @@ def tmux_available() -> bool:
 
 
 def stream_command_with_mode(
-    cmd: list[str], *, cwd: Path | None, display_mode: str
+    cmd: list[str],
+    *,
+    cwd: Path | None,
+    display_mode: str,
+    input_data: str | None = None,
 ) -> str:
-    if display_mode != "tmux":
-        return stream_command(cmd, cwd=cwd)
+    # tmux display can't carry a piped stdin prompt; pipe inline instead.
+    if display_mode != "tmux" or input_data is not None:
+        return stream_command(cmd, cwd=cwd, input_data=input_data)
 
     if not stdin_is_tty():
         print(
@@ -533,8 +570,12 @@ def run_claude_session(
         cmd.extend(["--resume", session_id])
     if not tools_enabled:
         cmd.extend(["--tools", ""])
-    cmd.extend(["--max-turns", str(max_turns), prompt])
-    output = stream_command_with_mode(cmd, cwd=cwd, display_mode=display_mode)
+    cmd.extend(["--max-turns", str(max_turns)])
+    # Feed the prompt via stdin rather than argv to avoid the per-argument
+    # MAX_ARG_STRLEN cap; claude -p reads the prompt from stdin when omitted.
+    output = stream_command_with_mode(
+        cmd, cwd=cwd, display_mode=display_mode, input_data=prompt
+    )
     parsed = parse_claude_json_output(output)
     parsed["session_id"] = parsed["session_id"] or session_id
     parsed["provider"] = "claude"
@@ -550,6 +591,8 @@ def run_codex_session(
     sandbox_mode: str = "workspace-write",
     full_auto: bool = True,
 ) -> dict:
+    # Pass "-" as the prompt so codex exec reads it from stdin, avoiding the
+    # per-argument MAX_ARG_STRLEN cap that overflows on large debate prompts.
     if thread_id:
         # `codex exec resume` does not accept -s/--sandbox; use -c config override.
         cmd = [*CODEX_CMD, "exec", "resume", "--json"]
@@ -557,16 +600,18 @@ def run_codex_session(
             cmd.append("--full-auto")
         else:
             cmd.extend(["-c", f'sandbox_mode="{sandbox_mode}"'])
-        cmd.extend([thread_id, prompt])
+        cmd.extend([thread_id, "-"])
     else:
         cmd = [*CODEX_CMD, "exec", "--json"]
         if full_auto:
             cmd.append("--full-auto")
         else:
             cmd.extend(["-s", sandbox_mode])
-        cmd.append(prompt)
+        cmd.append("-")
 
-    output = stream_command_with_mode(cmd, cwd=cwd, display_mode=display_mode)
+    output = stream_command_with_mode(
+        cmd, cwd=cwd, display_mode=display_mode, input_data=prompt
+    )
     parsed = parse_codex_json_output(output)
     parsed["session_id"] = parsed["session_id"] or thread_id
     parsed["provider"] = "codex"
