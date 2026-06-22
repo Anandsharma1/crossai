@@ -20,13 +20,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR = ROOT / "orchestrate.py"
 PROMPTS_DIR = ROOT / "prompts"
-PROJECT_MARKERS = [".git", ".vscode", "pyproject.toml", "package.json", "Cargo.toml", "go.mod"]
+PROJECT_MARKERS = [
+    ".git",
+    ".vscode",
+    "pyproject.toml",
+    "package.json",
+    "Cargo.toml",
+    "go.mod",
+]
 AGENTS = {"claude", "codex"}
 SESSION_POLICIES = ("auto", "fresh", "resume")
 SCOPE_POLICIES = ("adjudicate", "interactive", "off")
 HISTORY_CHAR_LIMIT = 80_000
 STREAM_IDLE_TIMEOUT_SECONDS = int(os.environ.get("CROSSAI_CLI_IDLE_TIMEOUT", "300"))
 STREAM_TOTAL_TIMEOUT_SECONDS = int(os.environ.get("CROSSAI_CLI_TOTAL_TIMEOUT", "1800"))
+# Override the codex binary + top-level flags via CROSSAI_CODEX_CMD, e.g.:
+#   CROSSAI_CODEX_CMD='codex --yolo'
+# Set CODEX_HOME separately in the shell environment if needed.
+CODEX_CMD: list[str] = shlex.split(os.environ.get("CROSSAI_CODEX_CMD", "codex"))
 FEATURE_SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 DEBATE_PHASES = {
     "generic": {
@@ -183,7 +194,11 @@ def latest_plan_file(project_root: Path, feature: str, agent: str) -> Path | Non
         return None
 
     rounds = sorted(
-        (path for path in plan_dir.iterdir() if path.is_dir() and path.name.startswith("r")),
+        (
+            path
+            for path in plan_dir.iterdir()
+            if path.is_dir() and path.name.startswith("r")
+        ),
         key=lambda path: int(path.name[1:]) if path.name[1:].isdigit() else -1,
         reverse=True,
     )
@@ -198,13 +213,19 @@ def latest_plan_file(project_root: Path, feature: str, agent: str) -> Path | Non
     return None
 
 
-def latest_debate_output(project_root: Path, feature: str, phase: str, agent: str) -> Path | None:
+def latest_debate_output(
+    project_root: Path, feature: str, phase: str, agent: str
+) -> Path | None:
     phase_dir = feature_dir(project_root, feature) / phase
     if not phase_dir.exists():
         return None
 
     rounds = sorted(
-        (path for path in phase_dir.iterdir() if path.is_dir() and path.name.startswith("r")),
+        (
+            path
+            for path in phase_dir.iterdir()
+            if path.is_dir() and path.name.startswith("r")
+        ),
         key=lambda path: int(path.name[1:]) if path.name[1:].isdigit() else -1,
         reverse=True,
     )
@@ -259,7 +280,9 @@ def terminate_process(proc: subprocess.Popen[bytes]) -> str:
     return tail
 
 
-def stream_command(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
+def stream_command(
+    cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None
+) -> str:
     print(f"$ {quote_cmd(cmd)}")
     proc = subprocess.Popen(
         cmd,
@@ -297,7 +320,9 @@ def stream_command(cmd: list[str], *, cwd: Path | None = None, env: dict[str, st
                 print(text, end="", flush=True)
                 chunks.append(text)
                 last_output_time = time.monotonic()
-        elif proc.poll() is None and now - last_output_time > STREAM_IDLE_TIMEOUT_SECONDS:
+        elif (
+            proc.poll() is None and now - last_output_time > STREAM_IDLE_TIMEOUT_SECONDS
+        ):
             output = "".join(chunks) + terminate_process(proc)
             raise CrossAIError(
                 f"command produced no output for {STREAM_IDLE_TIMEOUT_SECONDS}s: {quote_cmd(cmd)}\n{output.strip()}"
@@ -314,14 +339,20 @@ def stream_command(cmd: list[str], *, cwd: Path | None = None, env: dict[str, st
 
 
 def run_capture(cmd: list[str], *, cwd: Path | None = None) -> str:
-    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True
+    )
     if result.returncode != 0:
-        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, output=result.stdout, stderr=result.stderr
+        )
     return result.stdout
 
 
 def run_command_checked(cmd: list[str], *, cwd: Path | None = None) -> None:
-    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True
+    )
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip()
         raise SystemExit(f"command failed: {quote_cmd(cmd)}\n{details}")
@@ -331,21 +362,29 @@ def tmux_available() -> bool:
     return bool(os.environ.get("TMUX")) and shutil.which("tmux") is not None
 
 
-def stream_command_with_mode(cmd: list[str], *, cwd: Path | None, display_mode: str) -> str:
+def stream_command_with_mode(
+    cmd: list[str], *, cwd: Path | None, display_mode: str
+) -> str:
     if display_mode != "tmux":
         return stream_command(cmd, cwd=cwd)
 
     if not stdin_is_tty():
-        print("tmux mode requested without an interactive TTY; falling back to inline mode.")
+        print(
+            "tmux mode requested without an interactive TTY; falling back to inline mode."
+        )
         return stream_command(cmd, cwd=cwd)
 
     if not tmux_available():
-        print("tmux mode requested but tmux is unavailable in this session; falling back to inline mode.")
+        print(
+            "tmux mode requested but tmux is unavailable in this session; falling back to inline mode."
+        )
         return stream_command(cmd, cwd=cwd)
 
     import tempfile
 
-    with tempfile.NamedTemporaryFile(prefix="crossai-tmux-", suffix=".log", delete=False) as handle:
+    with tempfile.NamedTemporaryFile(
+        prefix="crossai-tmux-", suffix=".log", delete=False
+    ) as handle:
         log_path = Path(handle.name)
 
     shell_cmd = f"cd {shlex.quote(str(cwd or Path.cwd()))} && {quote_cmd(cmd)} | tee {shlex.quote(str(log_path))}"
@@ -418,7 +457,9 @@ def resolved_session_id(entry: dict | None, policy: str, label: str) -> str | No
         return None
     if policy == "resume":
         if not session_id:
-            raise SystemExit(f"no saved native session found for {label}; use --session-policy fresh or auto first")
+            raise SystemExit(
+                f"no saved native session found for {label}; use --session-policy fresh or auto first"
+            )
         return session_id
     return session_id
 
@@ -457,7 +498,11 @@ def parse_codex_json_output(output: str) -> dict:
         if event.get("type") == "thread.started":
             thread_id = event.get("thread_id")
         item = event.get("item")
-        if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+        if (
+            event.get("type") == "item.completed"
+            and isinstance(item, dict)
+            and item.get("type") == "agent_message"
+        ):
             final_text = item.get("text", "").strip()
 
     if final_text is None:
@@ -507,14 +552,14 @@ def run_codex_session(
 ) -> dict:
     if thread_id:
         # `codex exec resume` does not accept -s/--sandbox; use -c config override.
-        cmd = ["codex", "exec", "resume", "--json"]
+        cmd = [*CODEX_CMD, "exec", "resume", "--json"]
         if full_auto:
             cmd.append("--full-auto")
         else:
             cmd.extend(["-c", f'sandbox_mode="{sandbox_mode}"'])
         cmd.extend([thread_id, prompt])
     else:
-        cmd = ["codex", "exec", "--json"]
+        cmd = [*CODEX_CMD, "exec", "--json"]
         if full_auto:
             cmd.append("--full-auto")
         else:
@@ -562,12 +607,18 @@ def setup_worktree(project_root: Path, feature: str, agent: str) -> Path:
         return wt_path
 
     branch = branch_name(feature, agent)
-    subprocess.run(["git", "branch", branch], cwd=str(project_root), capture_output=True, text=True)
-    run_command_checked(["git", "worktree", "add", str(wt_path), branch], cwd=project_root)
+    subprocess.run(
+        ["git", "branch", branch], cwd=str(project_root), capture_output=True, text=True
+    )
+    run_command_checked(
+        ["git", "worktree", "add", str(wt_path), branch], cwd=project_root
+    )
     return wt_path
 
 
-def prepare_implementation_context(project_root: Path, feature: str, agent: str) -> tuple[Path, str, str]:
+def prepare_implementation_context(
+    project_root: Path, feature: str, agent: str
+) -> tuple[Path, str, str]:
     wt_path = setup_worktree(project_root, feature, agent)
     plan_path = latest_plan_file(project_root, feature, agent)
     if plan_path is None:
@@ -582,7 +633,9 @@ def prepare_implementation_context(project_root: Path, feature: str, agent: str)
     return wt_path, plan, principles
 
 
-def write_artifact(path: Path, content: str, *, phase: str, round_num: int, step: str, agent: str) -> None:
+def write_artifact(
+    path: Path, content: str, *, phase: str, round_num: int, step: str, agent: str
+) -> None:
     header = (
         f"<!-- CrossAI | phase: {phase} | round: {round_num} | step: {step} "
         f"| agent: {agent} | timestamp: {iso_now()} -->\n\n"
@@ -599,10 +652,14 @@ def format_history(entries: list[dict], initial_prompt: str) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def format_history_with_summary(entries: list[dict], initial_prompt: str, summary: str | None, summarized_up_to: int) -> str:
+def format_history_with_summary(
+    entries: list[dict], initial_prompt: str, summary: str | None, summarized_up_to: int
+) -> str:
     parts = [f"### Initial Prompt\n{initial_prompt}"]
     if summary:
-        parts.append(f"### Summary of Earlier Rounds (up to round {summarized_up_to})\n{summary}")
+        parts.append(
+            f"### Summary of Earlier Rounds (up to round {summarized_up_to})\n{summary}"
+        )
     for entry in entries:
         parts.append(
             f"### Round {entry['round']} — {entry['step']} ({entry['agent']})\n{entry['content']}"
@@ -618,7 +675,9 @@ def summarize_history_if_needed(
     summarized_up_to: int,
     history_entries: list[dict],
 ) -> tuple[str | None, int, list[dict]]:
-    formatted = format_history_with_summary(history_entries, initial_prompt, summary, summarized_up_to)
+    formatted = format_history_with_summary(
+        history_entries, initial_prompt, summary, summarized_up_to
+    )
     if len(formatted) <= HISTORY_CHAR_LIMIT or len(history_entries) <= 2:
         return summary, summarized_up_to, history_entries
 
@@ -658,36 +717,46 @@ def summarize_history_if_needed(
     return new_summary, new_summarized_up_to, recent
 
 
-def append_log(log_entries: list[dict], round_num: int, step: str, agent: str, content: str) -> None:
-    log_entries.append({
-        "timestamp": iso_now(),
-        "round": round_num,
-        "step": step,
-        "agent": agent,
-        "content": content.strip(),
-    })
+def append_log(
+    log_entries: list[dict], round_num: int, step: str, agent: str, content: str
+) -> None:
+    log_entries.append(
+        {
+            "timestamp": iso_now(),
+            "round": round_num,
+            "step": step,
+            "agent": agent,
+            "content": content.strip(),
+        }
+    )
 
 
-def save_debate_log(project_root: Path, feature: str, phase: str, log_entries: list[dict]) -> None:
+def save_debate_log(
+    project_root: Path, feature: str, phase: str, log_entries: list[dict]
+) -> None:
     path = feature_dir(project_root, feature) / phase / "debate.log.md"
     lines = [
         f"# CrossAI Debate Log: {feature} ({phase})",
         "",
     ]
     for entry in log_entries:
-        lines.extend([
-            f"## Round {entry['round']} — {entry['step']} ({entry['agent']})",
-            f"*{entry['timestamp']}*",
-            "",
-            entry["content"],
-            "",
-            "---",
-            "",
-        ])
+        lines.extend(
+            [
+                f"## Round {entry['round']} — {entry['step']} ({entry['agent']})",
+                f"*{entry['timestamp']}*",
+                "",
+                entry["content"],
+                "",
+                "---",
+                "",
+            ]
+        )
     write_text(path, "\n".join(lines).rstrip() + "\n")
 
 
-def latest_phase_artifact(project_root: Path, feature: str, phase: str, agent: str) -> Path | None:
+def latest_phase_artifact(
+    project_root: Path, feature: str, phase: str, agent: str
+) -> Path | None:
     return latest_debate_output(project_root, feature, phase, agent)
 
 
@@ -728,16 +797,23 @@ def extract_constraints_section(markdown: str) -> str:
     return after.strip()
 
 
-def scope_artifact_path(project_root: Path, feature: str, phase: str, name: str) -> Path:
+def scope_artifact_path(
+    project_root: Path, feature: str, phase: str, name: str
+) -> Path:
     return feature_dir(project_root, feature) / phase / name
 
 
-def run_scope_audit(initial_prompt: str, claude_output: str, codex_output: str, project_root: Path) -> str:
-    prompt = assemble_prompt("scope_check", {
-        "initial_prompt": initial_prompt,
-        "claude_output": claude_output,
-        "codex_output": codex_output,
-    })
+def run_scope_audit(
+    initial_prompt: str, claude_output: str, codex_output: str, project_root: Path
+) -> str:
+    prompt = assemble_prompt(
+        "scope_check",
+        {
+            "initial_prompt": initial_prompt,
+            "claude_output": claude_output,
+            "codex_output": codex_output,
+        },
+    )
     result = run_claude_session(
         prompt,
         cwd=project_root,
@@ -762,12 +838,18 @@ def resolve_scope_decisions(
     if scope_policy == "off":
         return None, None
 
-    candidates = run_scope_audit(initial_prompt, claude_output, codex_output, project_root)
-    candidates_path = scope_artifact_path(project_root, feature, phase, "scope_candidates.md")
+    candidates = run_scope_audit(
+        initial_prompt, claude_output, codex_output, project_root
+    )
+    candidates_path = scope_artifact_path(
+        project_root, feature, phase, "scope_candidates.md"
+    )
     write_text(candidates_path, candidates + "\n")
 
     if "NO_SCOPE_ISSUES" in candidates:
-        decision_path = scope_artifact_path(project_root, feature, phase, "scope_decisions.md")
+        decision_path = scope_artifact_path(
+            project_root, feature, phase, "scope_decisions.md"
+        )
         write_text(
             decision_path,
             "# Scope Drift Considered\n- No significant scope drift detected.\n\n# Notes\n- No extra scope constraints were added.\n",
@@ -776,7 +858,9 @@ def resolve_scope_decisions(
 
     if scope_policy == "interactive":
         if not stdin_is_tty():
-            print("interactive scope policy requested without a TTY; falling back to adjudicate.")
+            print(
+                "interactive scope policy requested without a TTY; falling back to adjudicate."
+            )
             scope_policy = "adjudicate"
         else:
             print(f"\n{candidates}\n")
@@ -810,53 +894,73 @@ def resolve_scope_decisions(
                 "# Accepted into Scope",
             ]
             if not excluded and not free_text:
-                decision_lines.append("- All candidate items were accepted into scope for this run.")
+                decision_lines.append(
+                    "- All candidate items were accepted into scope for this run."
+                )
             else:
-                decision_lines.append("- Only non-excluded candidate items remain in scope.")
-            decision_lines.extend([
-                "",
-                "# Rejected from V1 Scope",
-            ])
+                decision_lines.append(
+                    "- Only non-excluded candidate items remain in scope."
+                )
+            decision_lines.extend(
+                [
+                    "",
+                    "# Rejected from V1 Scope",
+                ]
+            )
             if excluded:
                 decision_lines.extend([f"- {item}" for item in excluded])
             if free_text:
                 decision_lines.append(f"- {free_text}")
             if not excluded and not free_text:
                 decision_lines.append("- None.")
-            decision_lines.extend([
-                "",
-                "# Constraints for Subsequent Rounds",
-            ])
+            decision_lines.extend(
+                [
+                    "",
+                    "# Constraints for Subsequent Rounds",
+                ]
+            )
             if excluded:
-                decision_lines.extend([f"- Do not expand scope to include: {item}" for item in excluded])
+                decision_lines.extend(
+                    [f"- Do not expand scope to include: {item}" for item in excluded]
+                )
             if free_text:
                 decision_lines.append(f"- Do not expand scope to include: {free_text}")
             if not excluded and not free_text:
                 decision_lines.append("- No extra scope constraints.")
-            decision_lines.extend([
-                "",
-                "# Notes",
-                "- Generated from interactive scope confirmation.",
-                "",
-            ])
+            decision_lines.extend(
+                [
+                    "",
+                    "# Notes",
+                    "- Generated from interactive scope confirmation.",
+                    "",
+                ]
+            )
             decision_text = "\n".join(decision_lines)
-            decision_path = scope_artifact_path(project_root, feature, phase, "scope_decisions.md")
+            decision_path = scope_artifact_path(
+                project_root, feature, phase, "scope_decisions.md"
+            )
             write_text(decision_path, decision_text)
             constraints = extract_constraints_section(decision_text)
             return (constraints if excluded or free_text else None), decision_path
 
-    claude_prompt = assemble_prompt("scope_adjudicate", {
-        "initial_prompt": initial_prompt,
-        "candidate_items": candidates,
-        "own_output": claude_output,
-        "other_output": codex_output,
-    })
-    codex_prompt = assemble_prompt("scope_adjudicate", {
-        "initial_prompt": initial_prompt,
-        "candidate_items": candidates,
-        "own_output": codex_output,
-        "other_output": claude_output,
-    })
+    claude_prompt = assemble_prompt(
+        "scope_adjudicate",
+        {
+            "initial_prompt": initial_prompt,
+            "candidate_items": candidates,
+            "own_output": claude_output,
+            "other_output": codex_output,
+        },
+    )
+    codex_prompt = assemble_prompt(
+        "scope_adjudicate",
+        {
+            "initial_prompt": initial_prompt,
+            "candidate_items": candidates,
+            "own_output": codex_output,
+            "other_output": claude_output,
+        },
+    )
     claude_scope = run_claude_session(
         claude_prompt,
         cwd=project_root,
@@ -874,15 +978,28 @@ def resolve_scope_decisions(
         full_auto=False,
     )["text"]
 
-    write_text(scope_artifact_path(project_root, feature, phase, "scope_adjudication.claude.md"), claude_scope.strip() + "\n")
-    write_text(scope_artifact_path(project_root, feature, phase, "scope_adjudication.codex.md"), codex_scope.strip() + "\n")
+    write_text(
+        scope_artifact_path(
+            project_root, feature, phase, "scope_adjudication.claude.md"
+        ),
+        claude_scope.strip() + "\n",
+    )
+    write_text(
+        scope_artifact_path(
+            project_root, feature, phase, "scope_adjudication.codex.md"
+        ),
+        codex_scope.strip() + "\n",
+    )
 
-    merge_prompt = assemble_prompt("scope_merge", {
-        "initial_prompt": initial_prompt,
-        "candidate_items": candidates,
-        "claude_scope": claude_scope,
-        "codex_scope": codex_scope,
-    })
+    merge_prompt = assemble_prompt(
+        "scope_merge",
+        {
+            "initial_prompt": initial_prompt,
+            "candidate_items": candidates,
+            "claude_scope": claude_scope,
+            "codex_scope": codex_scope,
+        },
+    )
     merged = run_claude_session(
         merge_prompt,
         cwd=project_root,
@@ -891,7 +1008,9 @@ def resolve_scope_decisions(
         max_turns=1,
         tools_enabled=False,
     )["text"]
-    decision_path = scope_artifact_path(project_root, feature, phase, "scope_decisions.md")
+    decision_path = scope_artifact_path(
+        project_root, feature, phase, "scope_decisions.md"
+    )
     write_text(decision_path, merged.strip() + "\n")
     return extract_constraints_section(merged), decision_path
 
@@ -930,8 +1049,12 @@ def run_debate_phase_native(
     sessions = load_sessions(project_root, feature)
     phase_sessions = sessions.setdefault("debate", {}).setdefault(phase, {})
     agent_sessions = {
-        "claude": resolved_session_id(phase_sessions.get("claude"), session_policy, f"{feature}/{phase}/claude"),
-        "codex": resolved_session_id(phase_sessions.get("codex"), session_policy, f"{feature}/{phase}/codex"),
+        "claude": resolved_session_id(
+            phase_sessions.get("claude"), session_policy, f"{feature}/{phase}/claude"
+        ),
+        "codex": resolved_session_id(
+            phase_sessions.get("codex"), session_policy, f"{feature}/{phase}/codex"
+        ),
     }
 
     history_entries: list[dict] = []
@@ -941,17 +1064,22 @@ def run_debate_phase_native(
     history_summary: str | None = None
     summarized_up_to = -1
 
-    effective_scope_policy = scope_policy if config.get("scope_supported", False) else "off"
+    effective_scope_policy = (
+        scope_policy if config.get("scope_supported", False) else "off"
+    )
 
     for round_num in range(rounds):
         round_root = phase_root / f"r{round_num}"
         ensure_dir(round_root)
 
         if round_num == 0:
-            groom_prompt = assemble_prompt(config["groom"], {
-                "initial_prompt": initial_prompt,
-                "principles": principles,
-            })
+            groom_prompt = assemble_prompt(
+                config["groom"],
+                {
+                    "initial_prompt": initial_prompt,
+                    "principles": principles,
+                },
+            )
             for agent in ("claude", "codex"):
                 if agent == "claude":
                     result = run_claude_session(
@@ -978,10 +1106,26 @@ def run_debate_phase_native(
                     "status": f"{phase}-round-{round_num}-groomed",
                 }
                 path = round_root / f"{agent}.{config['prefix']}.md"
-                write_artifact(path, result["text"], phase=phase, round_num=round_num, step="groom", agent=agent.capitalize())
+                write_artifact(
+                    path,
+                    result["text"],
+                    phase=phase,
+                    round_num=round_num,
+                    step="groom",
+                    agent=agent.capitalize(),
+                )
                 outputs_by_round.setdefault(round_num, {})[agent] = result["text"]
-                history_entries.append({"round": round_num, "step": "groom", "agent": agent.capitalize(), "content": result["text"].strip()})
-                append_log(log_entries, round_num, "groom", agent.capitalize(), result["text"])
+                history_entries.append(
+                    {
+                        "round": round_num,
+                        "step": "groom",
+                        "agent": agent.capitalize(),
+                        "content": result["text"].strip(),
+                    }
+                )
+                append_log(
+                    log_entries, round_num, "groom", agent.capitalize(), result["text"]
+                )
             save_sessions(project_root, feature, sessions)
 
             if effective_scope_policy != "off":
@@ -999,29 +1143,39 @@ def run_debate_phase_native(
             continue
 
         previous = outputs_by_round[round_num - 1]
-        history_summary, summarized_up_to, history_entries = summarize_history_if_needed(
-            project_root,
-            initial_prompt=initial_prompt,
-            summary=history_summary,
-            summarized_up_to=summarized_up_to,
-            history_entries=history_entries,
+        history_summary, summarized_up_to, history_entries = (
+            summarize_history_if_needed(
+                project_root,
+                initial_prompt=initial_prompt,
+                summary=history_summary,
+                summarized_up_to=summarized_up_to,
+                history_entries=history_entries,
+            )
         )
-        history = format_history_with_summary(history_entries, initial_prompt, history_summary, summarized_up_to)
+        history = format_history_with_summary(
+            history_entries, initial_prompt, history_summary, summarized_up_to
+        )
 
-        claude_critique_prompt = assemble_prompt(config["critique"], {
-            "other_agent": "Codex",
-            "other_plan": previous["codex"],
-            "own_plan": previous["claude"],
-            "principles": principles,
-            "conversation_history": history,
-        })
-        codex_critique_prompt = assemble_prompt(config["critique"], {
-            "other_agent": "Claude",
-            "other_plan": previous["claude"],
-            "own_plan": previous["codex"],
-            "principles": principles,
-            "conversation_history": history,
-        })
+        claude_critique_prompt = assemble_prompt(
+            config["critique"],
+            {
+                "other_agent": "Codex",
+                "other_plan": previous["codex"],
+                "own_plan": previous["claude"],
+                "principles": principles,
+                "conversation_history": history,
+            },
+        )
+        codex_critique_prompt = assemble_prompt(
+            config["critique"],
+            {
+                "other_agent": "Claude",
+                "other_plan": previous["claude"],
+                "own_plan": previous["codex"],
+                "principles": principles,
+                "conversation_history": history,
+            },
+        )
 
         claude_critique = run_claude_session(
             claude_critique_prompt,
@@ -1039,40 +1193,86 @@ def run_debate_phase_native(
             sandbox_mode="read-only",
             full_auto=False,
         )
-        agent_sessions["claude"] = claude_critique["session_id"] or agent_sessions["claude"]
-        agent_sessions["codex"] = codex_critique["session_id"] or agent_sessions["codex"]
+        agent_sessions["claude"] = (
+            claude_critique["session_id"] or agent_sessions["claude"]
+        )
+        agent_sessions["codex"] = (
+            codex_critique["session_id"] or agent_sessions["codex"]
+        )
 
-        write_artifact(round_root / "claude.critiques_codex.md", claude_critique["text"], phase=phase, round_num=round_num, step="critique", agent="Claude")
-        write_artifact(round_root / "codex.critiques_claude.md", codex_critique["text"], phase=phase, round_num=round_num, step="critique", agent="Codex")
-        history_entries.append({"round": round_num, "step": "critique", "agent": "Claude", "content": claude_critique["text"].strip()})
-        history_entries.append({"round": round_num, "step": "critique", "agent": "Codex", "content": codex_critique["text"].strip()})
-        append_log(log_entries, round_num, "critique", "Claude", claude_critique["text"])
+        write_artifact(
+            round_root / "claude.critiques_codex.md",
+            claude_critique["text"],
+            phase=phase,
+            round_num=round_num,
+            step="critique",
+            agent="Claude",
+        )
+        write_artifact(
+            round_root / "codex.critiques_claude.md",
+            codex_critique["text"],
+            phase=phase,
+            round_num=round_num,
+            step="critique",
+            agent="Codex",
+        )
+        history_entries.append(
+            {
+                "round": round_num,
+                "step": "critique",
+                "agent": "Claude",
+                "content": claude_critique["text"].strip(),
+            }
+        )
+        history_entries.append(
+            {
+                "round": round_num,
+                "step": "critique",
+                "agent": "Codex",
+                "content": codex_critique["text"].strip(),
+            }
+        )
+        append_log(
+            log_entries, round_num, "critique", "Claude", claude_critique["text"]
+        )
         append_log(log_entries, round_num, "critique", "Codex", codex_critique["text"])
 
-        revise_template = config["revise_final"] if round_num == rounds - 1 else config["revise"]
-        history_summary, summarized_up_to, history_entries = summarize_history_if_needed(
-            project_root,
-            initial_prompt=initial_prompt,
-            summary=history_summary,
-            summarized_up_to=summarized_up_to,
-            history_entries=history_entries,
+        revise_template = (
+            config["revise_final"] if round_num == rounds - 1 else config["revise"]
         )
-        history = format_history_with_summary(history_entries, initial_prompt, history_summary, summarized_up_to)
+        history_summary, summarized_up_to, history_entries = (
+            summarize_history_if_needed(
+                project_root,
+                initial_prompt=initial_prompt,
+                summary=history_summary,
+                summarized_up_to=summarized_up_to,
+                history_entries=history_entries,
+            )
+        )
+        history = format_history_with_summary(
+            history_entries, initial_prompt, history_summary, summarized_up_to
+        )
 
-        claude_revise_prompt = assemble_prompt(revise_template, {
-            "own_plan": previous["claude"],
-            "feedback": codex_critique["text"],
-            "feedback_source": "Codex",
-            "principles": principles,
-            "conversation_history": history,
-        })
-        codex_revise_prompt = assemble_prompt(revise_template, {
-            "own_plan": previous["codex"],
-            "feedback": claude_critique["text"],
-            "feedback_source": "Claude",
-            "principles": principles,
-            "conversation_history": history,
-        })
+        claude_revise_prompt = assemble_prompt(
+            revise_template,
+            {
+                "own_plan": previous["claude"],
+                "feedback": codex_critique["text"],
+                "feedback_source": "Codex",
+                "principles": principles,
+                "conversation_history": history,
+            },
+        )
+        codex_revise_prompt = assemble_prompt(
+            revise_template,
+            {
+                "own_plan": previous["codex"],
+                "feedback": claude_critique["text"],
+                "feedback_source": "Claude",
+                "principles": principles,
+                "conversation_history": history,
+            },
+        )
 
         claude_revised = run_claude_session(
             claude_revise_prompt,
@@ -1090,17 +1290,47 @@ def run_debate_phase_native(
             sandbox_mode="read-only",
             full_auto=False,
         )
-        agent_sessions["claude"] = claude_revised["session_id"] or agent_sessions["claude"]
+        agent_sessions["claude"] = (
+            claude_revised["session_id"] or agent_sessions["claude"]
+        )
         agent_sessions["codex"] = codex_revised["session_id"] or agent_sessions["codex"]
 
-        write_artifact(round_root / f"claude.revised_{config['prefix']}.md", claude_revised["text"], phase=phase, round_num=round_num, step="revise", agent="Claude")
-        write_artifact(round_root / f"codex.revised_{config['prefix']}.md", codex_revised["text"], phase=phase, round_num=round_num, step="revise", agent="Codex")
+        write_artifact(
+            round_root / f"claude.revised_{config['prefix']}.md",
+            claude_revised["text"],
+            phase=phase,
+            round_num=round_num,
+            step="revise",
+            agent="Claude",
+        )
+        write_artifact(
+            round_root / f"codex.revised_{config['prefix']}.md",
+            codex_revised["text"],
+            phase=phase,
+            round_num=round_num,
+            step="revise",
+            agent="Codex",
+        )
         outputs_by_round[round_num] = {
             "claude": claude_revised["text"],
             "codex": codex_revised["text"],
         }
-        history_entries.append({"round": round_num, "step": "revise", "agent": "Claude", "content": claude_revised["text"].strip()})
-        history_entries.append({"round": round_num, "step": "revise", "agent": "Codex", "content": codex_revised["text"].strip()})
+        history_entries.append(
+            {
+                "round": round_num,
+                "step": "revise",
+                "agent": "Claude",
+                "content": claude_revised["text"].strip(),
+            }
+        )
+        history_entries.append(
+            {
+                "round": round_num,
+                "step": "revise",
+                "agent": "Codex",
+                "content": codex_revised["text"].strip(),
+            }
+        )
         append_log(log_entries, round_num, "revise", "Claude", claude_revised["text"])
         append_log(log_entries, round_num, "revise", "Codex", codex_revised["text"])
 
@@ -1126,23 +1356,31 @@ def run_debate_phase_native(
     summary_path = phase_root / f"{phase}_summary.md"
     write_text(
         summary_path,
-        "\n".join([
-            f"# {phase.title()} Summary: {feature}",
-            "",
-            f"- Date: {iso_now()}",
-            f"- Phase: {phase}",
-            f"- Rounds completed: {rounds}",
-            f"- Debate mode: {'groom only' if rounds == 1 else 'full debate'}",
-            f"- Final Claude artifact: {claude_final}" if claude_final else "- Final Claude artifact: (missing)",
-            f"- Final Codex artifact: {codex_final}" if codex_final else "- Final Codex artifact: (missing)",
-            f"- Full debate log: {phase_root / 'debate.log.md'}",
-            "",
-            "## Next Steps",
-            "- Review both final artifacts and the debate log",
-            f"- Scope decisions: {scope_decision_artifact}" if scope_decision_artifact else "- Scope decisions: none",
-            "- Choose one (or merge) to carry forward",
-            "",
-        ]),
+        "\n".join(
+            [
+                f"# {phase.title()} Summary: {feature}",
+                "",
+                f"- Date: {iso_now()}",
+                f"- Phase: {phase}",
+                f"- Rounds completed: {rounds}",
+                f"- Debate mode: {'groom only' if rounds == 1 else 'full debate'}",
+                f"- Final Claude artifact: {claude_final}"
+                if claude_final
+                else "- Final Claude artifact: (missing)",
+                f"- Final Codex artifact: {codex_final}"
+                if codex_final
+                else "- Final Codex artifact: (missing)",
+                f"- Full debate log: {phase_root / 'debate.log.md'}",
+                "",
+                "## Next Steps",
+                "- Review both final artifacts and the debate log",
+                f"- Scope decisions: {scope_decision_artifact}"
+                if scope_decision_artifact
+                else "- Scope decisions: none",
+                "- Choose one (or merge) to carry forward",
+                "",
+            ]
+        ),
     )
     if history_summary:
         write_text(phase_root / "history_summary.md", history_summary + "\n")
@@ -1164,8 +1402,10 @@ def warn_if_feature_exists(project_root: Path, feature: str, *, force: bool) -> 
 
     # Look for signs of a previous run: any phase subdir or a run_state.json.
     prior_phases = [
-        p.name for p in fdir.iterdir()
-        if p.is_dir() and p.name in {"ideation", "plan", "generic", "implementation", "reviews"}
+        p.name
+        for p in fdir.iterdir()
+        if p.is_dir()
+        and p.name in {"ideation", "plan", "generic", "implementation", "reviews"}
     ]
     has_state = (fdir / "run_state.json").exists() or (fdir / "sessions.json").exists()
     if not prior_phases and not has_state:
@@ -1176,9 +1416,13 @@ def warn_if_feature_exists(project_root: Path, feature: str, *, force: bool) -> 
     if prior_phases:
         print(f"   Existing phases: {', '.join(sorted(prior_phases))}")
     if (fdir / "sessions.json").exists():
-        print("   Native sessions from a prior run will be reused (unless --session-policy=fresh)")
+        print(
+            "   Native sessions from a prior run will be reused (unless --session-policy=fresh)"
+        )
     print("   Artifacts in the current run will OVERWRITE existing round files.")
-    print("   To keep the old results: use a different --feature slug, or move the dir aside:")
+    print(
+        "   To keep the old results: use a different --feature slug, or move the dir aside:"
+    )
     print(f"     mv {fdir} {fdir}.backup")
     print()
 
@@ -1214,15 +1458,19 @@ def cmd_plan(args: argparse.Namespace) -> int:
     if args.no_scope_check:
         args.scope_policy = "off"
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "plan",
-        "status": "running",
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "scope_policy": args.scope_policy,
-        "updated_at": iso_now(),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "plan",
+            "status": "running",
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "scope_policy": args.scope_policy,
+            "updated_at": iso_now(),
+        },
+    )
 
     ideation_summary = run_debate_phase_native(
         project_root,
@@ -1236,9 +1484,13 @@ def cmd_plan(args: argparse.Namespace) -> int:
         display_mode=args.display_mode,
     )
 
-    plan_input_path = latest_phase_artifact(project_root, args.feature, "ideation", "claude")
+    plan_input_path = latest_phase_artifact(
+        project_root, args.feature, "ideation", "claude"
+    )
     if plan_input_path is None:
-        plan_input_path = latest_phase_artifact(project_root, args.feature, "ideation", "codex")
+        plan_input_path = latest_phase_artifact(
+            project_root, args.feature, "ideation", "codex"
+        )
     if plan_input_path is None:
         raise SystemExit("unable to locate ideation output for plan phase")
 
@@ -1254,19 +1506,23 @@ def cmd_plan(args: argparse.Namespace) -> int:
         display_mode=args.display_mode,
     )
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "plan",
-        "status": "completed",
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "scope_policy": args.scope_policy,
-        "updated_at": iso_now(),
-        "artifacts": {
-            "ideation_summary": str(ideation_summary),
-            "plan_summary": str(plan_summary),
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "plan",
+            "status": "completed",
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "scope_policy": args.scope_policy,
+            "updated_at": iso_now(),
+            "artifacts": {
+                "ideation_summary": str(ideation_summary),
+                "plan_summary": str(plan_summary),
+            },
         },
-    })
+    )
     return 0
 
 
@@ -1276,14 +1532,18 @@ def cmd_generic(args: argparse.Namespace) -> int:
     initial_prompt = resolve_initial_prompt(args)
     warn_if_feature_exists(project_root, args.feature, force=args.force)
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "generic",
-        "status": "running",
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "updated_at": iso_now(),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "generic",
+            "status": "running",
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "updated_at": iso_now(),
+        },
+    )
 
     summary = run_debate_phase_native(
         project_root,
@@ -1297,17 +1557,21 @@ def cmd_generic(args: argparse.Namespace) -> int:
         display_mode=args.display_mode,
     )
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "generic",
-        "status": "completed",
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "updated_at": iso_now(),
-        "artifacts": {
-            "generic_summary": str(summary),
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "generic",
+            "status": "completed",
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "updated_at": iso_now(),
+            "artifacts": {
+                "generic_summary": str(summary),
+            },
         },
-    })
+    )
     return 0
 
 
@@ -1317,19 +1581,27 @@ def cmd_implement(args: argparse.Namespace) -> int:
     implementer = ensure_agent(args.implementer, "implementer")
     sessions = load_sessions(project_root, args.feature)
     existing = sessions.get("implement", {}).get(implementer, {})
-    existing_session_id = resolved_session_id(existing, args.session_policy, f"{args.feature}/implement/{implementer}")
+    existing_session_id = resolved_session_id(
+        existing, args.session_policy, f"{args.feature}/implement/{implementer}"
+    )
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "implement",
-        "status": "running",
-        "implementer": implementer,
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "updated_at": iso_now(),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "implement",
+            "status": "running",
+            "implementer": implementer,
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "updated_at": iso_now(),
+        },
+    )
 
-    wt_path, plan, principles = prepare_implementation_context(project_root, args.feature, implementer)
+    wt_path, plan, principles = prepare_implementation_context(
+        project_root, args.feature, implementer
+    )
     if existing_session_id:
         prompt = (
             f"You are continuing implementation for feature '{args.feature}'. "
@@ -1337,11 +1609,14 @@ def cmd_implement(args: argparse.Namespace) -> int:
             f"Approved plan:\n{plan}\n\nShared principles:\n{principles}"
         )
     else:
-        prompt = assemble_prompt("implement", {
-            "plan": plan,
-            "principles": principles,
-            "feature": args.feature,
-        })
+        prompt = assemble_prompt(
+            "implement",
+            {
+                "plan": plan,
+                "principles": principles,
+                "feature": args.feature,
+            },
+        )
 
     result = run_agent_session(
         implementer,
@@ -1362,22 +1637,30 @@ def cmd_implement(args: argparse.Namespace) -> int:
     }
     save_sessions(project_root, args.feature, sessions)
 
-    impl_artifact = feature_dir(project_root, args.feature) / "implementation" / f"{implementer}.log.md"
+    impl_artifact = (
+        feature_dir(project_root, args.feature)
+        / "implementation"
+        / f"{implementer}.log.md"
+    )
     write_text(impl_artifact, result["text"].strip() + "\n")
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "implement",
-        "status": "completed",
-        "implementer": implementer,
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "updated_at": iso_now(),
-        "worktree": str(wt_path),
-        "branch": branch_name(args.feature, implementer),
-        "native_session": native_session_payload(implementer, result["session_id"]),
-        "artifact": str(impl_artifact),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "implement",
+            "status": "completed",
+            "implementer": implementer,
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "updated_at": iso_now(),
+            "worktree": str(wt_path),
+            "branch": branch_name(args.feature, implementer),
+            "native_session": native_session_payload(implementer, result["session_id"]),
+            "artifact": str(impl_artifact),
+        },
+    )
     return 0
 
 
@@ -1388,24 +1671,38 @@ def latest_review_session(sessions: dict, reviewer: str, target: str) -> str | N
     return None
 
 
-def run_review_pass(project_root: Path, *, feature: str, reviewer: str, target: str, pass_number: int, display_mode: str, session_policy: str) -> Path:
+def run_review_pass(
+    project_root: Path,
+    *,
+    feature: str,
+    reviewer: str,
+    target: str,
+    pass_number: int,
+    display_mode: str,
+    session_policy: str,
+) -> Path:
     wt_path = worktree_path(project_root, feature, target)
     if not wt_path.exists():
         raise SystemExit(f"target worktree does not exist: {wt_path}")
 
-    prompt = assemble_prompt("review", {
-        "other_agent": target.capitalize(),
-        "diff": get_worktree_diff(wt_path),
-        "principles": load_principles(project_root, feature),
-        "feature": feature,
-    })
+    prompt = assemble_prompt(
+        "review",
+        {
+            "other_agent": target.capitalize(),
+            "diff": get_worktree_diff(wt_path),
+            "principles": load_principles(project_root, feature),
+            "feature": feature,
+        },
+    )
 
     sessions = load_sessions(project_root, feature)
     reviewer_session_id = None
     if session_policy == "resume":
         reviewer_session_id = latest_review_session(sessions, reviewer, target)
         if not reviewer_session_id:
-            raise SystemExit(f"no saved review session found for {feature}/review/{reviewer}->{target}")
+            raise SystemExit(
+                f"no saved review session found for {feature}/review/{reviewer}->{target}"
+            )
     elif session_policy == "auto":
         reviewer_session_id = latest_review_session(sessions, reviewer, target)
 
@@ -1418,18 +1715,26 @@ def run_review_pass(project_root: Path, *, feature: str, reviewer: str, target: 
         review_mode=True,
     )
     resolved_reviewer_session_id = result["session_id"] or reviewer_session_id
-    artifact = feature_dir(project_root, feature) / "reviews" / f"pass-{pass_number}.{reviewer}.reviews_{target}.md"
+    artifact = (
+        feature_dir(project_root, feature)
+        / "reviews"
+        / f"pass-{pass_number}.{reviewer}.reviews_{target}.md"
+    )
     write_text(artifact, result["text"].strip() + "\n")
 
-    sessions.setdefault("review", {}).setdefault("passes", []).append({
-        "pass": pass_number,
-        "reviewer": reviewer,
-        "target": target,
-        "artifact": str(artifact),
-        "created_at": iso_now(),
-        "display_mode": display_mode,
-        "native_session": native_session_payload(reviewer, resolved_reviewer_session_id),
-    })
+    sessions.setdefault("review", {}).setdefault("passes", []).append(
+        {
+            "pass": pass_number,
+            "reviewer": reviewer,
+            "target": target,
+            "artifact": str(artifact),
+            "created_at": iso_now(),
+            "display_mode": display_mode,
+            "native_session": native_session_payload(
+                reviewer, resolved_reviewer_session_id
+            ),
+        }
+    )
     save_sessions(project_root, feature, sessions)
     return artifact
 
@@ -1453,17 +1758,22 @@ def apply_review_feedback(
     if plan_path is None:
         raise SystemExit(f"no {implementer} plan artifact found for feature {feature}")
 
-    prompt = assemble_prompt("apply_review", {
-        "feature": feature,
-        "principles": load_principles(project_root, feature),
-        "plan": read_text(plan_path),
-        "review": read_text(review_artifact),
-        "reviewer": reviewer.capitalize(),
-    })
+    prompt = assemble_prompt(
+        "apply_review",
+        {
+            "feature": feature,
+            "principles": load_principles(project_root, feature),
+            "plan": read_text(plan_path),
+            "review": read_text(review_artifact),
+            "reviewer": reviewer.capitalize(),
+        },
+    )
 
     sessions = load_sessions(project_root, feature)
     existing = sessions.get("implement", {}).get(implementer, {})
-    existing_session_id = resolved_session_id(existing, session_policy, f"{feature}/implement/{implementer}")
+    existing_session_id = resolved_session_id(
+        existing, session_policy, f"{feature}/implement/{implementer}"
+    )
     result = run_agent_session(
         implementer,
         prompt,
@@ -1473,7 +1783,11 @@ def apply_review_feedback(
         review_mode=False,
     )
     resolved_implementer_session_id = result["session_id"] or existing_session_id
-    artifact = feature_dir(project_root, feature) / "implementation" / f"pass-{pass_number}.{implementer}.applies_review.md"
+    artifact = (
+        feature_dir(project_root, feature)
+        / "implementation"
+        / f"pass-{pass_number}.{implementer}.applies_review.md"
+    )
     write_text(artifact, result["text"].strip() + "\n")
 
     sessions.setdefault("implement", {})[implementer] = {
@@ -1497,17 +1811,21 @@ def cmd_review(args: argparse.Namespace) -> int:
     if reviewer == target:
         raise SystemExit("reviewer and target must be different agents")
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "review",
-        "status": "running",
-        "reviewer": reviewer,
-        "target": target,
-        "current_pass": args.pass_number,
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "updated_at": iso_now(),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "review",
+            "status": "running",
+            "reviewer": reviewer,
+            "target": target,
+            "current_pass": args.pass_number,
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "updated_at": iso_now(),
+        },
+    )
 
     artifact = run_review_pass(
         project_root,
@@ -1519,18 +1837,22 @@ def cmd_review(args: argparse.Namespace) -> int:
         session_policy=args.session_policy,
     )
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "review",
-        "status": "completed",
-        "reviewer": reviewer,
-        "target": target,
-        "current_pass": args.pass_number,
-        "session_mode": "native",
-        "session_policy": args.session_policy,
-        "updated_at": iso_now(),
-        "artifact": str(artifact),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "review",
+            "status": "completed",
+            "reviewer": reviewer,
+            "target": target,
+            "current_pass": args.pass_number,
+            "session_mode": "native",
+            "session_policy": args.session_policy,
+            "updated_at": iso_now(),
+            "artifact": str(artifact),
+        },
+    )
     print(f"Review artifact: {artifact}")
     return 0
 
@@ -1547,31 +1869,39 @@ def cmd_loop(args: argparse.Namespace) -> int:
 
     wt_path = worktree_path(project_root, args.feature, implementer)
     if not wt_path.exists():
-        cmd_implement(argparse.Namespace(
-            feature=args.feature,
-            implementer=implementer,
-            session_policy=args.implementer_session_policy,
-            project_dir=str(project_root),
-        ))
+        cmd_implement(
+            argparse.Namespace(
+                feature=args.feature,
+                implementer=implementer,
+                session_policy=args.implementer_session_policy,
+                project_dir=str(project_root),
+            )
+        )
     elif args.implementer_session_policy == "resume":
         sessions = load_sessions(project_root, args.feature)
         existing = sessions.get("implement", {}).get(implementer, {})
-        resolved_session_id(existing, "resume", f"{args.feature}/implement/{implementer}")
+        resolved_session_id(
+            existing, "resume", f"{args.feature}/implement/{implementer}"
+        )
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "loop",
-        "status": "running",
-        "implementer": implementer,
-        "reviewer": reviewer,
-        "current_pass": 1,
-        "max_passes": args.passes,
-        "display_mode": args.display_mode,
-        "session_mode": "native",
-        "implementer_session_policy": args.implementer_session_policy,
-        "reviewer_session_policy": args.reviewer_session_policy,
-        "updated_at": iso_now(),
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "loop",
+            "status": "running",
+            "implementer": implementer,
+            "reviewer": reviewer,
+            "current_pass": 1,
+            "max_passes": args.passes,
+            "display_mode": args.display_mode,
+            "session_mode": "native",
+            "implementer_session_policy": args.implementer_session_policy,
+            "reviewer_session_policy": args.reviewer_session_policy,
+            "updated_at": iso_now(),
+        },
+    )
 
     latest_review = None
     for pass_number in range(1, args.passes + 1):
@@ -1585,21 +1915,25 @@ def cmd_loop(args: argparse.Namespace) -> int:
             display_mode=args.display_mode,
             session_policy=args.reviewer_session_policy if pass_number == 1 else "auto",
         )
-        save_run_state(project_root, args.feature, {
-            "feature": args.feature,
-            "phase": "loop",
-            "status": "running",
-            "implementer": implementer,
-            "reviewer": reviewer,
-            "current_pass": pass_number,
-            "max_passes": args.passes,
-            "display_mode": args.display_mode,
-            "last_review_artifact": str(latest_review),
-            "session_mode": "native",
-            "implementer_session_policy": args.implementer_session_policy,
-            "reviewer_session_policy": args.reviewer_session_policy,
-            "updated_at": iso_now(),
-        })
+        save_run_state(
+            project_root,
+            args.feature,
+            {
+                "feature": args.feature,
+                "phase": "loop",
+                "status": "running",
+                "implementer": implementer,
+                "reviewer": reviewer,
+                "current_pass": pass_number,
+                "max_passes": args.passes,
+                "display_mode": args.display_mode,
+                "last_review_artifact": str(latest_review),
+                "session_mode": "native",
+                "implementer_session_policy": args.implementer_session_policy,
+                "reviewer_session_policy": args.reviewer_session_policy,
+                "updated_at": iso_now(),
+            },
+        )
 
         if pass_number == args.passes:
             break
@@ -1613,24 +1947,30 @@ def cmd_loop(args: argparse.Namespace) -> int:
             review_artifact=latest_review,
             pass_number=pass_number,
             display_mode=args.display_mode,
-            session_policy=args.implementer_session_policy if pass_number == 1 else "auto",
+            session_policy=args.implementer_session_policy
+            if pass_number == 1
+            else "auto",
         )
 
-    save_run_state(project_root, args.feature, {
-        "feature": args.feature,
-        "phase": "loop",
-        "status": "completed",
-        "implementer": implementer,
-        "reviewer": reviewer,
-        "current_pass": args.passes,
-        "max_passes": args.passes,
-        "display_mode": args.display_mode,
-        "last_review_artifact": str(latest_review) if latest_review else None,
-        "updated_at": iso_now(),
-        "session_mode": "native",
-        "implementer_session_policy": args.implementer_session_policy,
-        "reviewer_session_policy": args.reviewer_session_policy,
-    })
+    save_run_state(
+        project_root,
+        args.feature,
+        {
+            "feature": args.feature,
+            "phase": "loop",
+            "status": "completed",
+            "implementer": implementer,
+            "reviewer": reviewer,
+            "current_pass": args.passes,
+            "max_passes": args.passes,
+            "display_mode": args.display_mode,
+            "last_review_artifact": str(latest_review) if latest_review else None,
+            "updated_at": iso_now(),
+            "session_mode": "native",
+            "implementer_session_policy": args.implementer_session_policy,
+            "reviewer_session_policy": args.reviewer_session_policy,
+        },
+    )
     return 0
 
 
@@ -1644,7 +1984,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     latest_review = None
     reviews_dir = feature_root / "reviews"
     if reviews_dir.exists():
-        review_files = sorted(reviews_dir.glob("*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+        review_files = sorted(
+            reviews_dir.glob("*.md"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
         if review_files:
             latest_review = str(review_files[0])
 
@@ -1669,19 +2013,25 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Claude-native wrapper around CrossAI workflows.")
+    parser = argparse.ArgumentParser(
+        description="Claude-native wrapper around CrossAI workflows."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     generic = subparsers.add_parser("generic", help="Run standalone cross-verification")
     generic.add_argument("--feature", required=True)
     generic_prompt = generic.add_mutually_exclusive_group(required=True)
     generic_prompt.add_argument("--prompt", help="Path to a prompt file")
-    generic_prompt.add_argument("--prompt-text", help="Inline prompt text (alternative to --prompt)")
+    generic_prompt.add_argument(
+        "--prompt-text", help="Inline prompt text (alternative to --prompt)"
+    )
     generic.add_argument("--rounds", type=int, default=3)
     generic.add_argument("--session-policy", choices=SESSION_POLICIES, default="auto")
     generic.add_argument("--read-codebase", action="store_true")
     generic.add_argument("--display-mode", choices=["inline", "tmux"], default="inline")
-    generic.add_argument("--force", "-f", action="store_true", help="Skip overwrite confirmation")
+    generic.add_argument(
+        "--force", "-f", action="store_true", help="Skip overwrite confirmation"
+    )
     generic.add_argument("--project-dir")
     generic.set_defaults(func=cmd_generic)
 
@@ -1689,18 +2039,24 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--feature", required=True)
     plan_prompt = plan.add_mutually_exclusive_group(required=True)
     plan_prompt.add_argument("--prompt", help="Path to a prompt file")
-    plan_prompt.add_argument("--prompt-text", help="Inline prompt text (alternative to --prompt)")
+    plan_prompt.add_argument(
+        "--prompt-text", help="Inline prompt text (alternative to --prompt)"
+    )
     plan.add_argument("--rounds", type=int, default=3)
     plan.add_argument("--session-policy", choices=SESSION_POLICIES, default="auto")
     plan.add_argument("--scope-policy", choices=SCOPE_POLICIES, default="adjudicate")
     plan.add_argument("--read-codebase", action="store_true")
     plan.add_argument("--no-scope-check", action="store_true")
     plan.add_argument("--display-mode", choices=["inline", "tmux"], default="inline")
-    plan.add_argument("--force", "-f", action="store_true", help="Skip overwrite confirmation")
+    plan.add_argument(
+        "--force", "-f", action="store_true", help="Skip overwrite confirmation"
+    )
     plan.add_argument("--project-dir")
     plan.set_defaults(func=cmd_plan)
 
-    implement = subparsers.add_parser("implement", help="Run implementation in a worktree")
+    implement = subparsers.add_parser(
+        "implement", help="Run implementation in a worktree"
+    )
     implement.add_argument("--feature", required=True)
     implement.add_argument("--implementer", default="claude", choices=sorted(AGENTS))
     implement.add_argument("--session-policy", choices=SESSION_POLICIES, default="auto")
@@ -1722,8 +2078,12 @@ def build_parser() -> argparse.ArgumentParser:
     loop.add_argument("--implementer", default="claude", choices=sorted(AGENTS))
     loop.add_argument("--reviewer", default="codex", choices=sorted(AGENTS))
     loop.add_argument("--passes", type=int, default=3)
-    loop.add_argument("--implementer-session-policy", choices=SESSION_POLICIES, default="auto")
-    loop.add_argument("--reviewer-session-policy", choices=SESSION_POLICIES, default="fresh")
+    loop.add_argument(
+        "--implementer-session-policy", choices=SESSION_POLICIES, default="auto"
+    )
+    loop.add_argument(
+        "--reviewer-session-policy", choices=SESSION_POLICIES, default="fresh"
+    )
     loop.add_argument("--display-mode", choices=["inline", "tmux"], default="inline")
     loop.add_argument("--project-dir")
     loop.set_defaults(func=cmd_loop)
@@ -1746,14 +2106,20 @@ def main() -> int:
             try:
                 project_root = find_project_root(getattr(args, "project_dir", None))
                 prior_state = load_json(run_state_path(project_root, args.feature), {})
-                save_run_state(project_root, args.feature, {
-                    **prior_state,
-                    "feature": args.feature,
-                    "phase": prior_state.get("phase", getattr(args, "command", "unknown")),
-                    "status": "failed",
-                    "error": str(exc),
-                    "updated_at": iso_now(),
-                })
+                save_run_state(
+                    project_root,
+                    args.feature,
+                    {
+                        **prior_state,
+                        "feature": args.feature,
+                        "phase": prior_state.get(
+                            "phase", getattr(args, "command", "unknown")
+                        ),
+                        "status": "failed",
+                        "error": str(exc),
+                        "updated_at": iso_now(),
+                    },
+                )
             except Exception:
                 pass
         if isinstance(exc, subprocess.CalledProcessError):
