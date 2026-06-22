@@ -12,7 +12,9 @@ Usage:
 """
 
 import argparse
+import os
 import re
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -33,7 +35,12 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 _PROJECT_MARKERS = [".git", ".vscode", "pyproject.toml", "package.json", "Cargo.toml", "go.mod"]
 
 CLAUDE_CMD = "claude"
-CODEX_CMD = "codex"
+# Override the codex binary + top-level flags via CROSSAI_CODEX_CMD, e.g.:
+#   CROSSAI_CODEX_CMD='codex --yolo'
+# Point at an alternate Codex config dir by setting CODEX_HOME in the shell
+# environment — the codex subprocess inherits it. Kept as a list so callers can
+# splat it (`[*CODEX_CMD, "exec", ...]`).
+CODEX_CMD: list[str] = shlex.split(os.environ.get("CROSSAI_CODEX_CMD", "codex"))
 
 CLAUDE_TIMEOUT = 300
 CODEX_TIMEOUT = 300
@@ -260,11 +267,11 @@ def run_claude_with_edits(prompt: str, cwd: str = None, timeout: int = CLAUDE_TI
     return _run_cli(cmd, "Claude (edits)", timeout, cwd=cwd)
 
 def run_codex(prompt: str, timeout: int = CODEX_TIMEOUT) -> str:
-    cmd = [CODEX_CMD, "exec", prompt]
+    cmd = [*CODEX_CMD, "exec", prompt]
     return _run_cli(cmd, "Codex", timeout)
 
 def run_codex_with_edits(prompt: str, cwd: str = None, timeout: int = CODEX_TIMEOUT) -> str:
-    cmd = [CODEX_CMD, "exec", "--full-auto", prompt]
+    cmd = [*CODEX_CMD, "exec", "--full-auto", prompt]
     return _run_cli(cmd, "Codex (edits)", timeout, cwd=cwd)
 
 def _run_cli(cmd: list, label: str, timeout: int, cwd: str = None, retries: int = MAX_RETRIES) -> str:

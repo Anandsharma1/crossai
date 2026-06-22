@@ -37,6 +37,11 @@ Scope policy flags for planning:
 - `interactive`: use manual exclusions after round 0
 - `off`: skip scope drift handling
 
+Codex instance flags (on `/crossai-generic`, `/crossai-plan`, `/crossai-implement`, `/crossai-loop`):
+- `--codex-cmd CMD`: override the codex binary and top-level flags (e.g. `"codex --yolo"`); sets `CROSSAI_CODEX_CMD`
+- `--codex-home PATH`: point Codex at an alternate config dir; sets `CODEX_HOME`
+- `--codex-cmd` wins over `--codex-home` for the binary itself; the two may be combined
+
 ## Reporting Requirements
 
 Always report:

@@ -78,6 +78,22 @@ To override for a single run without changing global config:
 
 If you want reproducible cross-machine behavior, pin the model in each CLI's config rather than relying on whatever default happens to be active.
 
+### Pointing at a specific Codex instance (home or command)
+
+You can swap the Codex binary, its top-level flags, or its config directory per run — no source edits required. Both `scripts/crossai_cli.py` and the legacy `orchestrate.py` honor these:
+
+| Knob | How to set it | Effect |
+|------|---------------|--------|
+| **Codex command** | `CROSSAI_CODEX_CMD` env var, e.g. `CROSSAI_CODEX_CMD='codex --yolo'` | Overrides the codex binary and any top-level flags (parsed with shell quoting). |
+| **Codex home** | `CODEX_HOME` env var, e.g. `CODEX_HOME=~/.codex-work` | Points Codex at an alternate config dir; the codex subprocess inherits it natively. |
+
+```bash
+CROSSAI_CODEX_CMD='codex --yolo' CODEX_HOME=~/.codex-work \
+  python3 scripts/crossai_cli.py generic --feature my-feat --prompt task.md
+```
+
+From the Claude-native slash commands, pass the same knobs as flags — `--codex-cmd "codex --yolo"` and `--codex-home ~/.codex-work` — on `/crossai-generic`, `/crossai-plan`, `/crossai-implement`, and `/crossai-loop`. The command strips them from the passthrough args and sets the matching env vars on the Python call. `--codex-cmd` takes precedence over `--codex-home` for the binary itself; both may be combined.
+
 ---
 
 ## Install
