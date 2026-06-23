@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.1.1] — 2026-06-23
 
 ### Added
 - Configurable Codex instance: `CROSSAI_CODEX_CMD` overrides the codex binary and top-level flags, and `CODEX_HOME` selects an alternate Codex config dir. Honored by both `scripts/crossai_cli.py` and the legacy `orchestrate.py`.
